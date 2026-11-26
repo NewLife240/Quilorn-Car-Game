@@ -58,6 +58,9 @@ func _ready() -> void:
 		var sh: Dictionary = world.props.find_object("parts_store")
 		var shp := Vector3(sh.x, sh.y, sh.z)
 		car.in_steer = 0.8
+		if OS.get_cmdline_user_args().has("shop"):
+			views = [["fb2_shop", "cam", shp + Vector3(9, 14, -9), shp + Vector3(0, 4, 0)], ["fb2_shop2", "cam", shp + (Basis(Vector3.UP, float(sh.rot)) * Vector3(0, 3, -16)), shp + Vector3(0, 3, 0)]]
+			return
 		views = [
 			["fb2_interior", "carfp", null, null],
 			["fb2_balcony", "cam", kp2 + kb * Vector3(-8, 2.0, 10), kp2 + kb * Vector3(-14, 8.0, 6.5)],

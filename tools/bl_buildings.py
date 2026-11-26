@@ -125,7 +125,7 @@ class B:
             self.bm.verts.remove(v)
         self.bm.normal_update()
 
-    def quad(self, m, p0, p1, p2, p3, uv=((0, 0), (1, 0), (1, 1), (0, 1))):
+    def quad(self, m, p0, p1, p2, p3, uv=((1, 0), (0, 0), (0, 1), (1, 1))):   # u runs left->right as seen from the front
         vs = [self.bm.verts.new(p) for p in (p0, p1, p2, p3)]
         f = self.bm.faces.new(vs)
         f.material_index = self.mi(m)
