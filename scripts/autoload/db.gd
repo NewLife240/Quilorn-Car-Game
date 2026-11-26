@@ -32,6 +32,19 @@ var PARTS := {
 		"grip_road": 0.9, "grip_mud": 1.15, "grip_dirt": 1.05},
 	"wheel_truck": {"name": "Truck Mud Tyre", "slot": "wheel", "cls": "big", "price": 320, "mass": 60.0, "mesh": P + "wheel_truck.glb", "bolts": 6, "wear": 0.3,
 		"grip_road": 0.92, "grip_mud": 1.2, "grip_dirt": 1.05},
+	# --- upgrades: same slots, better stats (power = output multiplier, cooling = radiator capacity)
+	"carburetor_twin": {"name": "Twin Weber Carburettor", "slot": "carburetor", "price": 430, "mass": 4.0, "mesh": P + "carburetor.glb", "bolts": 4, "wear": 0.7, "power": 1.12, "scale": 1.15},
+	"air_filter_sport": {"name": "Sport Air Filter", "slot": "air_filter", "price": 75, "mass": 0.7, "mesh": P + "air_filter.glb", "bolts": 1, "wear": 0.8, "power": 1.04},
+	"spark_plugs_iridium": {"name": "Iridium Spark Plugs", "slot": "spark_plugs", "price": 95, "mass": 0.4, "mesh": P + "spark_plugs.glb", "bolts": 4, "wear": 0.3, "power": 1.02},
+	"ignition_coil_sport": {"name": "High-Output Ignition Coil", "slot": "ignition_coil", "price": 150, "mass": 1.3, "mesh": P + "ignition_coil.glb", "bolts": 2, "wear": 0.25, "power": 1.02},
+	"alternator_heavy": {"name": "Heavy-Duty Alternator", "slot": "alternator", "price": 270, "mass": 7.0, "mesh": P + "alternator.glb", "bolts": 2, "wear": 0.2, "charge": 1.8},
+	"starter_gear": {"name": "Gear-Reduction Starter", "slot": "starter", "price": 220, "mass": 4.0, "mesh": P + "starter.glb", "bolts": 2, "wear": 0.0, "crank": 1.6},
+	"battery_heavy": {"name": "Battery 75Ah Heavy-Duty", "slot": "battery", "price": 195, "mass": 19.0, "mesh": P + "battery.glb", "bolts": 2, "wear": 0.05, "scale": 1.12, "crank": 1.3},
+	"radiator_alu": {"name": "Aluminium Radiator", "slot": "radiator", "price": 340, "mass": 5.0, "mesh": P + "radiator.glb", "bolts": 4, "wear": 0.1, "cooling": 1.5},
+	"exhaust_sport": {"name": "Sport Exhaust", "slot": "exhaust", "price": 330, "mass": 9.0, "mesh": P + "exhaust.glb", "bolts": 3, "wear": 0.2, "power": 1.05},
+	"fuel_tank_big": {"name": "Long-Range Fuel Tank", "slot": "fuel_tank", "price": 380, "mass": 14.0, "mesh": P + "fuel_tank.glb", "bolts": 4, "wear": 0.05, "scale": 1.15, "capacity_mult": 1.5},
+	"wheel_allterrain": {"name": "All-Terrain Tyre", "slot": "wheel", "cls": "small", "price": 120, "mass": 16.0, "mesh": P + "wheel_offroad.glb", "bolts": 4, "wear": 0.4,
+		"grip_road": 0.97, "grip_mud": 0.95, "grip_dirt": 0.98},
 }
 
 # Consumables & tools: pickable items that are not installed.
@@ -40,6 +53,8 @@ var ITEMS := {
 	"oil_bottle": {"name": "Motor Oil 4L", "price": 30, "mass": 0.5, "mesh": P + "oil_bottle.glb", "fluid": "oil", "capacity": 4.0},
 	"coolant_bottle": {"name": "Coolant 5L", "price": 22, "mass": 0.5, "mesh": P + "coolant_bottle.glb", "fluid": "coolant", "capacity": 5.0},
 	"repair_kit": {"name": "Repair Kit", "price": 60, "mass": 3.0, "mesh": "res://assets/props/crate.glb", "scale": 0.35, "repair": 35.0},
+	"spray_paint": {"name": "Spray Paint (repaint a car)", "price": 45, "mass": 0.4, "mesh": P + "oil_bottle.glb", "scale": 0.7, "paint": true},
+	"diesel_can": {"name": "Jerry Can 20L (empty)", "price": 35, "mass": 2.0, "mesh": P + "jerrycan.glb", "fluid": "fuel", "capacity": 20.0, "empty": true},
 }
 
 # Gear sets: index 0 = reverse, 1 = neutral, 2.. forward

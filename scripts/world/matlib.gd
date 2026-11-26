@@ -63,11 +63,12 @@ static func _make(key: String) -> Material:
 	var m := StandardMaterial3D.new()
 	m.resource_name = key
 	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED   # generated geometry is often single-sided
 	if key.begins_with("sign_"):
 		m.albedo_texture = load(T + "signs/%s.png" % key.substr(5))
 		m.emission_enabled = true
 		m.emission_texture = m.albedo_texture
-		m.emission_energy_multiplier = 0.15
+		m.emission_energy_multiplier = 0.5
 		m.roughness = 0.6
 		return m
 	if key in UV_TEX:

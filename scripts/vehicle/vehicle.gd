@@ -36,6 +36,9 @@ var tp_cam: Camera3D
 var _tp_yaw := 0.0
 var _tp_pitch := -0.25
 var _tp_idle := 0.0
+var _steer_base := Basis()
+var _steer_axis := Vector3.BACK
+var _tp_smooth := Vector3(0, 2, 6)
 var _fp_yaw := 0.0
 var _fp_pitch := 0.0
 
@@ -451,12 +454,15 @@ func _build_cameras() -> void:
 	fp_cam.position = _v3(meta.eye)
 	fp_cam.near = 0.03
 	fp_cam.far = 3000.0
+	fp_cam.top_level = true
+	fp_cam.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	add_child(fp_cam)
 	tp_cam = Camera3D.new()
 	tp_cam.name = "TPCam"
 	tp_cam.top_level = true
 	tp_cam.near = 0.1
 	tp_cam.far = 3000.0
+	tp_cam.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	add_child(tp_cam)
 
 
@@ -819,7 +825,7 @@ func _physics_process(dt: float) -> void:
 	var starter_t := 0.0
 	if cranking and not running:
 		if has("starter") and bat > 8.0 and has("engine"):
-			starter_t = 70.0 * slot_q("starter") * (1.0 if cls == "small" else 3.5) * clampf(bat / 40.0, 0.3, 1.0)
+			starter_t = 70.0 * float(DB.part(slots.starter.part_id()).get("crank", 1.0)) * float(DB.part(slots.battery.part_id()).get("crank", 1.0)) * slot_q("starter") * (1.0 if cls == "small" else 3.5) * clampf(bat / 40.0, 0.3, 1.0)
 			_battery_add(-1.4 * dt)
 			if engine_rpm > 140.0 and can_run():
 				var p := 0.35 + 1.6 * slot_q("ignition_coil") * slot_q("spark_plugs") * clampf(slot_q("carburetor") + 0.2, 0.0, 1.0)
@@ -858,13 +864,14 @@ func _physics_process(dt: float) -> void:
 			clutch = move_toward(clutch, 1.0, dt * 5.0)
 		clutch *= clampf(slot_q("gearbox") * 1.3, 0.3, 1.0)
 	if auto_gearbox and gear >= 2 and shift_timer <= 0.0 and running:
-		var up_rpm := lerpf(red * 0.55, red * 0.9, in_throttle)
+		var peak: float = e.get("rpm_peak", red * 0.6)
+		var up_rpm := lerpf(peak * 0.95, maxf(peak * 1.2, red * 0.78), in_throttle)
 		var drv_slip := 0.0
 		for w in driven:
 			drv_slip = maxf(drv_slip, absf(w.omega * w.radius - w.get("vlong", 0.0)))
 		if engine_rpm > up_rpm and gear < ratios.size() - 1 and clutch > 0.9 and drv_slip < 2.5 and speed_kmh > (gear - 1) * 9.0:
 			_shift(gear + 1)
-		elif engine_rpm < idle * 1.5 and gear > 2:
+		elif engine_rpm < idle * 1.35 and gear > 2:
 			_shift(gear - 1)
 		elif in_throttle > 0.85 and gear > 2 and engine_rpm < red * 0.45:
 			var nr: float = ratios[gear - 1] * float(gears.final) * (float(gears.low) if low_range else 1.0)
@@ -936,6 +943,9 @@ func _physics_process(dt: float) -> void:
 			* (0.94 if not has("exhaust") else 1.0) * clampf(0.55 + 0.45 * slot_q("carburetor"), 0.0, 1.0)
 		if oil < 0.5:
 			power_mult *= 0.7
+		for sn in ["carburetor", "air_filter", "spark_plugs", "ignition_coil", "exhaust"]:
+			if has(sn):
+				power_mult *= float(DB.part(slots[sn].part_id()).get("power", 1.0))
 	# misfires from worn plugs / carb / coil
 	misfire = move_toward(misfire, 0.0, dt * 6.0)
 	if running:
@@ -1125,7 +1135,7 @@ func _physics_process(dt: float) -> void:
 		if depth > _bay().position.y + 0.25 and running:
 			_stall("Engine flooded with water!")
 	# ---------- parked: keep still
-	if driver == null and spd < 0.25 and _wheel_ground >= 3:
+	if spd < 0.25 and _wheel_ground >= 3 and (driver == null or (in_throttle < 0.05 and (in_brake > 0.1 or in_handbrake > 0.1 or gear == 1 or clutch < 0.05))):
 		linear_velocity *= 0.85
 		angular_velocity *= 0.85
 	# ---------- running costs
@@ -1155,7 +1165,7 @@ func _simulate_engine_state(dt: float, red: float) -> void:
 		fuel = maxf(0.0, fuel - float(e.get("fuel_use", 1.0)) * (0.0002 + 0.009 * load_f) * dt)
 		oil = maxf(0.0, oil - (0.00002 + 0.00008 * load_f) * dt * (1.0 + (1.0 - slot_q("engine")) * 3.0))
 		if has("alternator") and engine_rpm > 900.0:
-			_battery_add(0.06 * slot_q("alternator") * dt)
+			_battery_add(0.06 * slot_q("alternator") * float(DB.part(slots.alternator.part_id()).get("charge", 1.0)) * dt)
 		# wear
 		var wmul := dt / 3600.0 * 8.0
 		for sn in ["engine", "carburetor", "air_filter", "spark_plugs", "ignition_coil", "alternator", "gearbox", "exhaust", "radiator"]:
@@ -1187,7 +1197,7 @@ func _simulate_engine_state(dt: float, red: float) -> void:
 	var heat := (0.35 + 2.4 * load_f) if running else 0.0
 	var cool := (0.016 + 0.03 * clampf(speed_kmh / 70.0, 0.0, 1.0))
 	if has("radiator"):
-		cool *= clampf(slot_q("radiator") * (coolant / COOLANT_CAP), 0.04, 1.0)
+		cool *= clampf(slot_q("radiator") * (coolant / COOLANT_CAP), 0.04, 1.0) * float(DB.part(slots.radiator.part_id()).get("cooling", 1.0))
 	else:
 		cool *= 0.04
 	if temp < 88.0:
@@ -1232,7 +1242,10 @@ func _process(dt: float) -> void:
 		var yaw := steer_angle if w.steer else 0.0
 		vis.basis = Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, -w.spin)
 	if steer_node and steer_node.visible:
-		steer_node.rotation.z = -in_steer * 2.2
+		if _steer_base == Basis():
+			_steer_base = steer_node.basis
+			_steer_axis = (_v3(meta.eye) - _v3(meta.steer)).normalized()
+		steer_node.basis = Basis(_steer_axis, -in_steer * 2.2) * _steer_base
 	if needles.size() > 0 and driver:
 		var e := engine_def()
 		var red: float = e.get("redline", 6000.0)
@@ -1265,8 +1278,8 @@ func _process(dt: float) -> void:
 			var look := Basis(Vector3.UP, _fp_yaw) * Basis(Vector3.RIGHT, _fp_pitch)
 			if Input.is_action_pressed("look_back"):
 				look = Basis(Vector3.UP, PI * 0.95)
-			fp_cam.basis = look
-			fp_cam.position = _v3(meta.eye) + Vector3(0, sin(Time.get_ticks_msec() * 0.03) * 0.002 * clampf(engine_rpm / 3000.0, 0, 1), 0)
+			var bx := get_global_transform_interpolated()
+			fp_cam.global_transform = bx * Transform3D(look, _v3(meta.eye))
 		else:
 			_update_tp_cam(dt)
 
@@ -1280,13 +1293,14 @@ func _update_tp_cam(dt: float) -> void:
 	_tp_idle += dt
 	var L: float = meta.length
 	var dist := L * 1.25 + 2.5
-	var heading := atan2(global_basis.z.x, global_basis.z.z)
+	var ix := get_global_transform_interpolated()
+	var heading := atan2(ix.basis.z.x, ix.basis.z.z)
 	if _tp_idle > 1.6 and speed_kmh > 4.0:
 		var target_yaw := 0.0
 		_tp_yaw = lerp_angle(_tp_yaw, target_yaw, dt * 1.6)
 		_tp_pitch = lerpf(_tp_pitch, -0.22, dt * 1.0)
 	var yaw := heading + _tp_yaw
-	var pivot: Vector3 = global_position + Vector3.UP * (meta.height * 0.75 + 0.4)
+	var pivot: Vector3 = ix.origin + Vector3.UP * (meta.height * 0.75 + 0.4)
 	var dir := Vector3(sin(yaw) * cos(_tp_pitch), -sin(_tp_pitch), cos(yaw) * cos(_tp_pitch))
 	var want: Vector3 = pivot + dir * dist
 	var q := PhysicsRayQueryParameters3D.create(pivot, want, 1)
@@ -1296,7 +1310,9 @@ func _update_tp_cam(dt: float) -> void:
 		want = hit.position - dir * 0.3
 	if terrain:
 		want.y = maxf(want.y, terrain.height_at(want.x, want.z) + 0.5)
-	tp_cam.global_position = tp_cam.global_position.lerp(want, clampf(dt * 12.0, 0, 1)) if tp_cam.global_position.distance_to(want) < 15.0 else want
+	# smooth only the orbit distance/height, never lag behind the car (prevents jitter while accelerating)
+	_tp_smooth = _tp_smooth.lerp(want - pivot, clampf(dt * 10.0, 0, 1)) if _tp_smooth.distance_to(want - pivot) < 15.0 else want - pivot
+	tp_cam.global_position = pivot + _tp_smooth
 	tp_cam.look_at(pivot, Vector3.UP)
 
 
@@ -1378,6 +1394,13 @@ func _rebuild_cargo_visual() -> void:
 	_cargo_nodes.visible = total > 0
 
 
+func fuel_capacity() -> float:
+	var m := 1.0
+	if has("fuel_tank"):
+		m = float(DB.part(slots.fuel_tank.part_id()).get("capacity_mult", 1.0))
+	return float(def.fuel_cap) * m
+
+
 # ------------------------------------------------------------------ trunk
 func trunk_capacity_kg() -> float:
 	return 60.0 + float(def.cargo) * 90.0
@@ -1427,7 +1450,7 @@ func add_fluid(kind: String, amount: float) -> float:
 		"fuel":
 			if not has("fuel_tank"):
 				return 0.0
-			var a := minf(amount, float(def.fuel_cap) - fuel)
+			var a := minf(amount, fuel_capacity() - fuel)
 			fuel += a
 			return a
 		"oil":

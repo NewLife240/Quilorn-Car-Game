@@ -6,9 +6,9 @@
 import bpy, bmesh, json, os, sys, math
 from mathutils import Vector, Matrix
 
-HOME = os.path.expanduser("~")
-SRC = HOME + "/assets_dl"
-OUT = "/home/user/rusty_roads/assets/vehicles"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC = ROOT + "/tools/src_assets"
+OUT = ROOT + "/assets/vehicles"
 PSX = SRC + "/psx_style_cars_by_ggbot_august2023"
 SOV = SRC + "/x_russian_vehicles_lowepoly_pixelart"
 RGS = SRC + "/free_low_poly_vehicles_pack_by_rgsdev/Free Low Poly Vehicles Pack by Rgsdev"
@@ -396,7 +396,7 @@ def process(vid, cfg):
     eye = Vector((drv_x, seat_y + 0.05, min(seat_z + 0.66, roof - 0.16)))
     bmi = bmesh.new()
     F = lambda c, s: add_box(bmi, c, s)
-    mats = [mat("int_plastic", (0.06, 0.06, 0.065), 0.7), mat("int_fabric", (0.35, 0.12, 0.08), 0.95), mat("int_metal", (0.5, 0.5, 0.52), 0.4, 0.8), mat("gauge", (1, 1, 1), 0.5), mat("int_liner", (0.62, 0.6, 0.55), 0.95)]
+    mats = [mat("int_plastic", (0.06, 0.06, 0.065), 0.7), mat("int_fabric", (0.35, 0.12, 0.08), 0.95), mat("int_metal", (0.5, 0.5, 0.52), 0.4, 0.8), mat("gauge", (1, 1, 1), 0.5), mat("int_liner", (0.28, 0.27, 0.25), 0.95)]
     # floor + firewall + liner
     for f in F((0, (dash_y + rear) / 2, floor - 0.02), (2 * iw, dash_y - rear, 0.04)):
         f.material_index = 0
@@ -420,7 +420,7 @@ def process(vid, cfg):
         fs = F(((p0 + p1) / 2).to_tuple(), (0.04, 0.06, ln + 0.04))
         ang = math.atan2(-(p1.y - p0.y), p1.z - p0.z)
         vs = list({v for f in fs for v in f.verts})
-        bmesh.ops.rotate(bmi, verts=vs, cent=(p0 + p1) / 2, matrix=Matrix.Rotation(-ang, 3, 'X'))
+        bmesh.ops.rotate(bmi, verts=vs, cent=(p0 + p1) / 2, matrix=Matrix.Rotation(ang, 3, 'X'))
         for f in fs:
             f.material_index = 4
         # B pillar
@@ -449,14 +449,19 @@ def process(vid, cfg):
             f.material_index = 1
         for f in F((0, ry - 0.27, seat_z + 0.33), (2 * iw - 0.15, 0.12, 0.6)):
             f.material_index = 1
-    # gear lever + console
-    for f in F((0, seat_y + 0.45, floor + 0.08), (0.18, 0.5, 0.16)):
+    # gear lever with a knob and a rubber boot
+    for f in F((0, seat_y + 0.55, floor + 0.04), (0.14, 0.14, 0.06)):
         f.material_index = 0
-    for f in F((0, seat_y + 0.55, floor + 0.32), (0.025, 0.025, 0.35)):
+    for f in F((0, seat_y + 0.55, floor + 0.25), (0.02, 0.02, 0.4)):
         f.material_index = 2
+    res = bmesh.ops.create_icosphere(bmi, subdivisions=1, radius=0.035)
+    for v in res["verts"]:
+        v.co += Vector((0, seat_y + 0.55, floor + 0.47))
+    for f in {f for v in res["verts"] for f in v.link_faces}:
+        f.material_index = 0
     # steering column
     col_c = Vector((drv_x, dash_y - 0.30, belt - 0.12))
-    for f in F((drv_x, dash_y - 0.2, belt - 0.15), (0.07, 0.25, 0.07)):
+    for f in F((drv_x, dash_y - 0.22, belt - 0.12), (0.06, 0.22, 0.06)):
         f.material_index = 0
     # gauge faces (disc) on dash face toward driver
     gauges = {}

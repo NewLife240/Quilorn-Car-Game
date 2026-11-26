@@ -134,32 +134,62 @@ func _place(c: Dictionary, dt: float) -> void:
 func _physics_process(dt: float) -> void:
 	var space := get_world_3d().direct_space_state
 	var cam := get_viewport().get_camera_3d()
+	var cam_pos := cam.global_position if cam else Vector3.ZERO
 	for c in cars:
 		var body: AnimatableBody3D = c.body
 		var fwd := -body.global_basis.z
+		var side := fwd.cross(Vector3.UP)
 		var target: float = c.max
-		# look ahead for obstacles (player vehicles, player, other traffic)
-		var from: Vector3 = body.global_position + Vector3.UP * 0.8 + fwd * (float(c.len) * 0.5 + 0.3)
-		var q := PhysicsRayQueryParameters3D.create(from, from + fwd * 16.0, (1 << 1) | (1 << 3))
-		q.exclude = [body.get_rid()]
-		var hit := space.intersect_ray(q)
-		if hit:
-			var d: float = from.distance_to(hit.position)
-			target = 0.0 if d < 7.0 else minf(target, (d - 7.0) * 1.5)
+		# look ahead further when faster: stopping distance at 7 m/s^2 plus a margin
+		var look: float = clampf(float(c.speed) * float(c.speed) / 14.0 + 14.0, 14.0, 45.0)
+		var nearest := 1e9
+		for off in [-0.7, 0.0, 0.7]:
+			var from: Vector3 = body.global_position + Vector3.UP * 0.9 + fwd * (float(c.len) * 0.5 + 0.2) + side * off
+			var q := PhysicsRayQueryParameters3D.create(from, from + fwd * look, (1 << 1) | (1 << 3) | (1 << 2))
+			q.exclude = [body.get_rid()]
+			var hit := space.intersect_ray(q)
+			if hit:
+				nearest = minf(nearest, from.distance_to(hit.position))
+		if nearest < 1e8:
+			target = 0.0 if nearest < 6.0 else minf(target, sqrt(maxf(0.0, 2.0 * 6.0 * (nearest - 6.0))))
 		# slow in curves
 		var a := _pt(c.pts, c.i)
 		var b := _pt(c.pts, c.i + c.dir * 6.0)
 		var e := _pt(c.pts, c.i + c.dir * 12.0)
 		var curve := (b - a).normalized().angle_to((e - b).normalized())
 		target = minf(target, lerpf(c.max, 7.0, clampf(curve / 0.6, 0, 1)))
-		c.speed = move_toward(c.speed, target, dt * (6.0 if target < c.speed else 2.5))
-		# advance along the polyline (points ~2 m apart)
+		# end of the road: stop, and only turn around / respawn when nobody is looking
+		var to_end: float = (c.pts.size() - 2 - c.i) if c.dir > 0 else (c.i - 1.0)
+		if to_end < 10.0:
+			target = minf(target, maxf(0.0, (to_end - 2.0) * 1.2))
+			if to_end < 2.5 and float(c.speed) < 0.3 and body.global_position.distance_to(cam_pos) > 140.0:
+				_respawn(c, cam_pos)
+				continue
+		c.speed = move_toward(c.speed, target, dt * (7.0 if target < c.speed else 2.2))
 		var seg := _pt(c.pts, c.i).distance_to(_pt(c.pts, c.i + c.dir))
-		c.i += c.dir * c.speed * dt / maxf(seg, 0.5)
-		if c.i <= 1.0 or c.i >= c.pts.size() - 2:
-			c.dir = -c.dir
-			c.i = clampf(c.i, 1.0, c.pts.size() - 2.0)
+		c.i = clampf(c.i + c.dir * c.speed * dt / maxf(seg, 0.5), 1.0, c.pts.size() - 2.0)
 		_place(c, dt)
+
+
+func _respawn(c: Dictionary, cam_pos: Vector3) -> void:
+	var roads: Array = []
+	for rd in world.data.roads:
+		if rd.kind == "asphalt" and rd.pts.size() > 40:
+			roads.append(rd)
+	for attempt in range(12):
+		var rd: Dictionary = roads.pick_random()
+		var idx := randi_range(5, rd.pts.size() - 6)
+		var p := Vector3(rd.pts[idx][0], rd.pts[idx][1], rd.pts[idx][2])
+		if p.distance_to(cam_pos) > 180.0:
+			c.pts = rd.pts
+			c.i = float(idx)
+			c.dir = 1 if randf() < 0.5 else -1
+			c.lane = 1.9 if rd.w >= 7 else 1.5
+			c.speed = 0.0
+			_place(c, 0.0)
+			(c.body as AnimatableBody3D).reset_physics_interpolation()
+			return
+	c.dir = -c.dir
 
 
 func set_night(on: bool) -> void:

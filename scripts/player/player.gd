@@ -54,6 +54,8 @@ func _ready() -> void:
 	cam.near = 0.05
 	cam.far = 3000.0
 	cam.current = true
+	cam.top_level = true
+	cam.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	head.add_child(cam)
 	ray = RayCast3D.new()
 	ray.target_position = Vector3(0, 0, -REACH)
@@ -192,6 +194,10 @@ func _physics_process(dt: float) -> void:
 
 
 func _process(dt: float) -> void:
+	# camera follows the interpolated body every rendered frame (smooth at any FPS)
+	if not vehicle:
+		var o := get_global_transform_interpolated().origin
+		cam.global_transform = Transform3D(Basis(Vector3.UP, _yaw) * Basis(Vector3.RIGHT, _pitch), o + Vector3.UP * head.position.y)
 	if vehicle:
 		hint = ""
 		info = ""
@@ -234,6 +240,8 @@ func _update_target() -> void:
 			info = (col.get_meta("vehicle_ref") as Vehicle).trunk_text()
 		elif col is Area3D and col.has_meta("vehicle_action") and def.has("fluid"):
 			hint = _fluid_hint(col, def)
+		elif col is Area3D and col.has_meta("vehicle_action") and def.has("paint"):
+			hint = "[Hold E] Repaint the car"
 		return
 	if col == null:
 		return
@@ -331,6 +339,16 @@ func _continuous_actions(dt: float) -> void:
 				var amt := minf(rate * dt, float(held.data.fill))
 				var added := v.add_fluid(def.fluid, amt)
 				held.data.fill = float(held.data.fill) - added
+		elif def.has("paint") and col is Area3D and col.has_meta("vehicle_ref"):
+			_use_hold += dt
+			if _use_hold > 2.5:
+				_use_hold = 0.0
+				var pv: Vehicle = col.get_meta("vehicle_ref")
+				pv.apply_paint(pv.paint + 1)
+				Game.notify("Fresh paint!")
+				var it2 := held
+				_release()
+				it2.queue_free()
 		elif def.has("repair") and col is PartSlot and (col as PartSlot).is_installed():
 			_use_hold += dt
 			if _use_hold > 2.0:
@@ -499,6 +517,7 @@ func exit_vehicle() -> void:
 		if c is CollisionShape3D:
 			c.disabled = false
 	global_position = p
+	reset_physics_interpolation()
 	var f := -v.global_basis.z
 	_yaw = atan2(-f.x, -f.z) + PI * 0.5
 	_pitch = 0.0

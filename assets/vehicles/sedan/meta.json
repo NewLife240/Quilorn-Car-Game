@@ -140,5 +140,6 @@
   ],
   "capacity": 4,
   "kind": "bed"
- }
+ },
+ "cutout": false
 }

@@ -123,5 +123,6 @@
   ]
  },
  "variants": [],
- "cargo": null
+ "cargo": null,
+ "cutout": false
 }

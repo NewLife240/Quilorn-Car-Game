@@ -6,8 +6,9 @@
 import bpy, bmesh, math, os, sys, random
 from mathutils import Vector, Matrix
 
-OUT = "/home/user/rusty_roads/assets/buildings"
-OUTN = "/home/user/rusty_roads/assets/nature"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT = ROOT + "/assets/buildings"
+OUTN = ROOT + "/assets/nature"
 os.makedirs(OUT, exist_ok=True)
 os.makedirs(OUTN, exist_ok=True)
 random.seed(7)
@@ -256,6 +257,33 @@ class B:
             for dx in (-w * 0.4, w * 0.4):
                 self.box("metal", (c[0] + dx, c[1] - 0.06, (c[2] - h / 2) / 2), (0.1, 0.1, c[2] - h / 2), uv=False)
 
+    def door(self, cx, cy, cz, w, h, facing):
+        # real door: frame + recessed panel + handle (no more paper-thin quads)
+        nrm = {"+y": Vector((0, 1, 0)), "-y": Vector((0, -1, 0)), "+x": Vector((1, 0, 0)), "-x": Vector((-1, 0, 0))}[facing]
+        along_x = facing in ("+y", "-y")
+        c = Vector((cx, cy, cz))
+        fw = (w + 0.24, 0.1, h + 0.12) if along_x else (0.1, w + 0.24, h + 0.12)
+        b0 = c + nrm * 0.03
+        self.box("wood_dark", (b0.x, b0.y, b0.z + 0.06), fw, uv=True)
+        pw = (w, 0.07, h) if along_x else (0.07, w, h)
+        p0 = c + nrm * 0.07
+        self.box("door_wood", (p0.x, p0.y, p0.z), pw, uv=False)
+        self.wall_quad("door_wood", p0.x + nrm.x * 0.036, p0.y + nrm.y * 0.036, p0.z, w, h, facing)
+        hx = (w * 0.35, 0, 0) if along_x else (0, w * 0.35, 0)
+        hp = c + nrm * 0.12 + Vector(hx)
+        self.box("metal", (hp.x, hp.y, hp.z - 0.1), (0.05, 0.05, 0.05), uv=False)
+        # step
+        st = c + nrm * 0.35
+        self.box("concrete", (st.x, st.y, cz - h / 2 - 0.05), (w + 0.6 if along_x else 0.7, 0.7 if along_x else w + 0.6, 0.2))
+
+    def roof_sign(self, key, c, w, h):
+        # double-sided board on two posts, readable from every direction
+        for dx in (-w * 0.4, w * 0.4):
+            self.box("metal", (c[0] + dx, c[1], c[2] - h / 2 - 0.45), (0.08, 0.08, 0.9), uv=False)
+        self.box("metal", (c[0], c[1], c[2]), (w + 0.12, 0.08, h + 0.12), uv=False)
+        self.wall_quad("sign_" + key, c[0], c[1] + 0.045, c[2], w, h, "+y")
+        self.wall_quad("sign_" + key, c[0], c[1] - 0.045, c[2], w, h, "-y")
+
     def window(self, c, w, h, facing, kind="window_plain"):
         self.wall_quad(kind, c[0], c[1], c[2], w, h, facing)
 
@@ -306,8 +334,8 @@ def khata(name, wall="plaster_white", roof="slate", sx=9.0, sy=6.0, hw=2.7, porc
     for y in (-sy * 0.22, sy * 0.22):
         b.window((sx / 2 + 0.01, y, 1.7), 1.4, 1.4, "+x", win)
         b.window((-sx / 2 - 0.01, y, 1.7), 1.4, 1.4, "-x", win)
-    b.wall_quad("door_wood", sx * 0.33, sy / 2 + 0.01, 1.25, 1.0, 2.1, "+y")
-    b.wall_quad("door_wood", -sx * 0.05, -sy / 2 - 0.01, 1.25, 0.9, 2.0, "-y")
+    b.door(sx * 0.33, sy / 2 + 0.01, 1.25, 1.0, 2.1, "+y")
+    b.door(-sx * 0.05, -sy / 2 - 0.01, 1.25, 0.9, 2.0, "-y")
     # porch with steps and small roof
     b.box("concrete", (sx * 0.33, sy / 2 + 0.6, 0.0), (1.8, 1.2, 0.55))
     b.gable(roof, (sx * 0.33, sy / 2 + 0.7, 2.45), 1.6, 1.2, 0.5, over=0.15, along='y')
@@ -370,7 +398,7 @@ def shed():
     b = B()
     b.box("wood", (0, 0, 1.2), (4.0, 3.0, 2.4), col=True)
     b.gable("tin", (0, 0, 2.4), 4.0, 3.0, 1.0, 0.3, 'x', "wood")
-    b.wall_quad("door_wood", 0.8, 1.51, 1.05, 0.9, 2.0, "+y")
+    b.door(0.8, 1.51, 1.05, 0.9, 2.0, "+y")
     b.export("shed")
 
 
@@ -399,9 +427,10 @@ def shop_village():
     b.box("plaster_yellow", (0, 0, 1.7), (10, 7, 3.4), col=True)
     b.box("slate", (0, 0, 3.5), (10.6, 7.6, 0.25))
     b.sign("shop", (0, 3.52, 2.9), 4.0, 0.75)
+    b.roof_sign("shop", (0, 0, 4.8), 3.6, 0.8)
     b.window((-2.8, 3.51, 1.5), 2.4, 1.5, "+y")
     b.window((2.8, 3.51, 1.5), 2.4, 1.5, "+y")
-    b.wall_quad("door_wood", 0, 3.51, 1.1, 1.2, 2.2, "+y")
+    b.door(0, 3.51, 1.1, 1.2, 2.2, "+y")
     b.box("concrete", (0, 4.0, 0.1), (3, 1.2, 0.2))
     b.ip("shop_general", (0, 4.2, 1.0))
     b.ip("deliver", (5.0, 8.0, 0.5))
@@ -418,7 +447,7 @@ def church():
     b.dome("dome_blue", (0, 6.5, 14), 2.2, 4.0)
     b.dome("gold", (0, -2, 11), 1.6, 3.2)
     b.cyl("plaster_white", (0, -2, 10.4), 1.4, 1.2, 12)
-    b.wall_quad("door_wood", 0, 9.01, 1.6, 1.6, 3.0, "+y")
+    b.door(0, 9.01, 1.6, 1.6, 3.0, "+y")
     for y in (-6, -2, 2):
         b.window((4.01, y, 4.5), 1.0, 2.4, "+x")
         b.window((-4.01, y, 4.5), 1.0, 2.4, "-x")
@@ -463,6 +492,7 @@ def gas_station():
     b.box("metal_white", (0, 0, 5.2), (13, 9, 0.5))
     b.box("metal_red", (0, 4.52, 5.2), (13, 0.05, 0.5))
     b.sign("gas", (0, 4.56, 6.0), 4.0, 0.75)
+    b.roof_sign("gas", (0, 0, 6.3), 4.0, 0.75)
     b.box("concrete", (-2.5, 0, 0.12), (1.5, 6, 0.25))
     b.box("concrete", (2.5, 0, 0.12), (1.5, 6, 0.25))
     pump(b, -2.5, 1.5)
@@ -477,7 +507,7 @@ def gas_station():
     b.box("plaster_white", (0, -9, 1.6), (7, 4, 3.2), col=True)
     b.box("metal_red", (0, -9, 3.3), (7.4, 4.4, 0.25))
     b.window((-1.8, -6.99, 1.6), 2.6, 1.6, "+y")
-    b.wall_quad("door_wood", 1.6, -6.99, 1.1, 1.0, 2.2, "+y")
+    b.door(1.6, -6.99, 1.1, 1.0, 2.2, "+y")
     b.ip("shop_gas", (1.6, -6.4, 1.0))
     b.export("gas_station")
 
@@ -491,13 +521,19 @@ def khrushchevka():
     for i in range(4):
         x = -L / 2 + L * (i + 0.5) / 4
         b.box("concrete", (x, D / 2 + 0.8, 2.6), (2.4, 1.6, 0.15))
-        b.wall_quad("door_wood", x, D / 2 + 0.01, 1.2, 1.3, 2.2, "+y")
+        for sx in (-1.1, 1.1):
+            b.box("concrete", (x + sx, D / 2 + 0.75, 1.3), (0.15, 1.5, 2.6))
+        b.box("concrete", (x, D / 2 + 0.75, 0.15), (2.4, 1.5, 0.3))
+        b.door(x, D / 2 + 0.01, 1.4, 1.3, 2.2, "+y")
     # balconies
     for i in range(12):
         x = -L / 2 + 2.0 + i * 4.0
         for f in range(1, 5):
-            b.box("concrete", (x, -D / 2 - 0.6, f * 3.0 + 0.1), (2.6, 1.2, 0.12))
-            b.box("metal", (x, -D / 2 - 1.18, f * 3.0 + 0.6), (2.6, 0.05, 1.0))
+            z0 = f * 3.0 + 0.1
+            b.box("concrete", (x, -D / 2 - 0.6, z0), (2.6, 1.2, 0.14))
+            b.box("metal", (x, -D / 2 - 1.17, z0 + 0.55), (2.6, 0.06, 1.0))
+            for sx in (-1.27, 1.27):
+                b.box("metal", (x + sx, -D / 2 - 0.6, z0 + 0.55), (0.06, 1.2, 1.0))
     b.export("khrushchevka")
 
 
@@ -507,9 +543,10 @@ def parts_store():
     b.box("bricks", (0, 0, 2.25), (14, 10, 4.5), col=True)
     b.box("tin", (0, 0, 4.6), (14.6, 10.6, 0.25))
     b.sign("parts", (0, 5.02, 3.8), 6.0, 1.1)
+    b.roof_sign("parts", (0, 0, 6.0), 6.0, 1.1)
     b.window((-3.5, 5.01, 1.6), 4.0, 2.0, "+y")
     b.window((3.8, 5.01, 1.6), 3.0, 2.0, "+y")
-    b.wall_quad("door_wood", 0.8, 5.01, 1.15, 1.4, 2.3, "+y")
+    b.door(0.8, 5.01, 1.15, 1.4, 2.3, "+y")
     b.box("concrete", (0.8, 5.6, 0.1), (3.0, 1.2, 0.2))
     b.box("tin", (0.8, 5.8, 2.9), (3.4, 1.8, 0.1))
     b.ip("shop_parts", (0.8, 5.8, 1.0))
@@ -531,7 +568,7 @@ def car_market():
     b.col((0, -D / 2, 0.9), (W, 0.2, 1.8))
     b.box("metal_blue", (-W / 2 + 5, -D / 2 + 3, 1.3), (6, 2.5, 2.6), col=True)
     b.window((-W / 2 + 4, -D / 2 + 4.26, 1.5), 1.6, 1.0, "+y")
-    b.wall_quad("door_wood", -W / 2 + 6.5, -D / 2 + 4.26, 1.05, 0.9, 2.0, "+y")
+    b.door(-W / 2 + 6.5, -D / 2 + 4.26, 1.05, 0.9, 2.0, "+y")
     b.sign("carmarket", (0, D / 2 - 0.5, 4.0), 7.0, 1.3, posts=True)
     b.ip("car_market", (-W / 2 + 6.5, -D / 2 + 5.0, 1.0))
     b.ip("sell", (0, D / 2 - 5, 0.5))
@@ -620,7 +657,7 @@ def office(b, c, sign=None, ip="office", w=6.0, d=4.0):
     b.box("plaster_white", (c[0], c[1], 1.4), (w, d, 2.8), col=True)
     b.box("slate", (c[0], c[1], 2.9), (w + 0.5, d + 0.5, 0.2))
     b.window((c[0] - 1.2, c[1] + d / 2 + 0.01, 1.5), 1.4, 1.2, "+y")
-    b.wall_quad("door_wood", c[0] + 1.3, c[1] + d / 2 + 0.01, 1.05, 0.9, 2.0, "+y")
+    b.door(c[0] + 1.3, c[1] + d / 2 + 0.01, 1.05, 0.9, 2.0, "+y")
     if sign:
         b.sign(sign, (c[0], c[1] + d / 2 + 0.02, 3.4), 3.6, 0.65)
     b.ip(ip, (c[0] + 1.3, c[1] + d / 2 + 0.7, 1.0))
@@ -648,7 +685,7 @@ def lumber_camp():
     b.box("wood", (-8, 6, 1.4), (6, 4, 2.8), col=True)
     b.gable("tin_green", (-8, 6, 2.8), 6, 4, 1.2, 0.3, 'x', "wood")
     b.sign("lumber", (-8, 8.02, 3.6), 3.4, 0.6)
-    b.wall_quad("door_wood", -6.8, 8.01, 1.05, 0.9, 2.0, "+y")
+    b.door(-6.8, 8.01, 1.05, 0.9, 2.0, "+y")
     b.ip("office", (-6.8, 8.7, 1.0))
     log_pile(b, (6, -4, 0), 14)
     log_pile(b, (6, 3, 0), 12)
@@ -715,9 +752,10 @@ def bakery():
     b.box("slate", (0, 0, 4.55), (14.5, 10.5, 0.3))
     b.box("bricks", (4, -2, 6), (1.0, 1.0, 3.5))
     b.sign("bakery", (0, 5.02, 3.7), 3.5, 0.9)
+    b.roof_sign("bakery", (0, 0, 5.9), 3.5, 0.9)
     for x in (-4, 4):
         b.window((x, 5.01, 1.7), 2.4, 1.5, "+y")
-    b.wall_quad("door_wood", 0, 5.01, 1.1, 1.2, 2.2, "+y")
+    b.door(0, 5.01, 1.1, 1.2, 2.2, "+y")
     b.ip("office", (0, 5.7, 1.0))
     b.ip("load", (-5, 9, 0.5))
     b.ip("deliver", (5, 9, 0.5))
@@ -758,7 +796,7 @@ def furniture_factory():
         b.gable("tin", (-12 + i * 6, 0, 8.0), 6, 16, 2.0, 0.1, 'y', "glass")
     b.sign("furniture", (0, 8.02, 6.6), 5.0, 1.1)
     b.wall_quad("gate_steel", -6, 8.01, 2.5, 5.0, 5.0, "+y")
-    b.wall_quad("door_wood", 6, 8.01, 1.1, 1.2, 2.2, "+y")
+    b.door(6, 8.01, 1.1, 1.2, 2.2, "+y")
     b.ip("office", (6, 8.7, 1.0))
     b.ip("load", (-8, 13, 0.5))
     b.ip("deliver", (8, 14, 0.5))
@@ -769,7 +807,7 @@ def junkyard_office():
     b = B()
     b.box("rust", (0, 0, 1.3), (6, 2.5, 2.6), col=True)
     b.window((-1, 1.26, 1.5), 1.4, 0.9, "+y")
-    b.wall_quad("door_wood", 1.8, 1.26, 1.05, 0.9, 2.0, "+y")
+    b.door(1.8, 1.26, 1.05, 0.9, 2.0, "+y")
     b.sign("junk", (0, 1.3, 3.2), 5.5, 0.6)
     for i in range(10):
         a = i * 0.63
@@ -802,7 +840,7 @@ def street_lamp():
 
 def wreck():
     bpy.ops.wm.read_factory_settings(use_empty=True)
-    src = os.path.expanduser("~/assets_dl/psx_style_cars_by_ggbot_august2023/Car 06/Car6.obj")
+    src = ROOT + "/tools/src_assets/psx_style_cars_by_ggbot_august2023/Car 06/Car6.obj"
     bpy.ops.wm.obj_import(filepath=src, forward_axis='NEGATIVE_Z', up_axis='Y')
     o = [o for o in bpy.context.scene.objects if o.type == 'MESH'][0]
     bpy.context.view_layer.objects.active = o

@@ -127,5 +127,6 @@
   "car8_mail.png",
   "car8_grey.png"
  ],
- "cargo": null
+ "cargo": null,
+ "cutout": false
 }

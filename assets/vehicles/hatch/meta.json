@@ -127,5 +127,6 @@
   "car3_red.png",
   "car3_yellow.png"
  ],
- "cargo": null
+ "cargo": null,
+ "cutout": false
 }

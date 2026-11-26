@@ -303,6 +303,13 @@ func _center_panel(parent: Control, size: Vector2) -> PanelContainer:
 
 
 # ------------------------------------------------------------------ pause
+func open_pause_menu() -> void:
+	if pause_menu == null:
+		close_modal()
+		close_tablet()
+		_open_pause()
+
+
 func _open_pause() -> void:
 	pause_menu = _overlay()
 	Game.set_ui_open(true)
@@ -355,7 +362,7 @@ func close_modal() -> void:
 
 
 # ------------------------------------------------------------------ shops
-const SHOP_GENERAL := ["jerrycan", "oil_bottle", "coolant_bottle", "repair_kit", "air_filter", "spark_plugs", "battery"]
+const SHOP_GENERAL := ["jerrycan", "diesel_can", "oil_bottle", "coolant_bottle", "repair_kit", "spray_paint", "air_filter", "air_filter_sport", "spark_plugs", "spark_plugs_iridium", "battery", "wheel_road", "ignition_coil"]
 
 
 func open_shop(kind: String, pickup: Vector3) -> void:
@@ -363,7 +370,7 @@ func open_shop(kind: String, pickup: Vector3) -> void:
 	v.add_child(UIKit.label("Bought items are placed on the pallet / counter outside.", 15, Color(0.7, 0.7, 0.7)))
 	var list := UIKit.vbox([], 6)
 	v.add_child(UIKit.scroll(list))
-	var ids: Array = DB.PARTS.keys() + ["jerrycan", "oil_bottle", "coolant_bottle", "repair_kit"] if kind == "parts" else SHOP_GENERAL
+	var ids: Array = DB.PARTS.keys() + ["jerrycan", "oil_bottle", "coolant_bottle", "repair_kit", "spray_paint"] if kind == "parts" else SHOP_GENERAL
 	for id in ids:
 		var d := DB.part(id)
 		var r := UIKit.row_panel()

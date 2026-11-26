@@ -6,7 +6,8 @@ import numpy as np, json, os, math
 from scipy import ndimage
 from PIL import Image
 
-OUT = "/home/user/rusty_roads/assets/world"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT = ROOT + "/assets/world"
 os.makedirs(OUT, exist_ok=True)
 N = 2049
 HALF = 1024
@@ -389,6 +390,46 @@ for rd_idx, keep in [(0, lambda x, z: -430 < x < 330), (3, lambda x, z: z < 470)
             place("street_lamp", px, pz, math.atan2(n[0] * side, n[1] * side))
         k += 1
 
+# keep every object off the roads: nudge buildings / poles / lamps away, drop fence runs that end up on a road
+FOOT0 = {"khata": 9, "khata_b": 8, "khata_tin": 9, "home_house": 9, "garage": 6, "shed": 3, "shop_village": 8, "church": 11, "bus_stop": 2.5,
+         "well": 1.5, "gas_station": 9, "khrushchevka": 26, "parts_store": 9, "car_market": 22, "town_market": 13, "warehouse": 17,
+         "monument": 4, "sawmill": 18, "lumber_camp": 14, "barn": 16, "grain_elevator": 12, "cowshed": 26, "flour_mill": 14, "bakery": 9,
+         "oil_press": 14, "quarry_office": 18, "furniture_factory": 18, "junkyard_office": 26, "power_pole": 0.6, "street_lamp": 0.5, "wreck": 2.5}
+keep = []
+for o in objs:
+    k = o["kind"]
+    if k == "fence_run":
+        ri, ci = int(round(o["z"] + HALF)), int(round(o["x"] + HALF))
+        half = float(o.get("length", 18)) / 2
+        ok = True
+        yaw = o["rot"]
+        for t in np.linspace(-half, half, 9):
+            fx, fz = o["x"] + math.cos(yaw) * t, o["z"] - math.sin(yaw) * t
+            r2, c2 = int(round(fz + HALF)), int(round(fx + HALF))
+            if 0 <= r2 < N and 0 <= c2 < N and dist[r2, c2] - hw[r2, c2] < 1.2:
+                ok = False
+        if ok:
+            keep.append(o)
+        continue
+    rr = FOOT0.get(k)
+    if rr is not None:
+        for it in range(60):
+            ri, ci = int(round(o["z"] + HALF)), int(round(o["x"] + HALF))
+            if not (0 <= ri < N and 0 <= ci < N):
+                break
+            gap = dist[ri, ci] - hw[ri, ci]
+            if gap >= rr + 1.0:
+                break
+            cz, cx = ir[ri, ci] - HALF, ic[ri, ci] - HALF
+            d = np.array([o["x"] - cx, o["z"] - cz])
+            n_ = np.linalg.norm(d)
+            d = d / n_ if n_ > 1e-3 else np.array([1.0, 0.0])
+            o["x"] = round(o["x"] + d[0] * 1.0, 2)
+            o["z"] = round(o["z"] + d[1] * 1.0, 2)
+        o["y"] = round(H(o["x"], o["z"]), 2)
+    keep.append(o)
+objs[:] = keep
+
 FOOT = {"khata": 9, "khata_b": 8, "khata_tin": 9, "home_house": 10, "garage": 7, "shed": 4, "shop_village": 9, "church": 12, "bus_stop": 3,
         "well": 2, "gas_station": 13, "khrushchevka": 28, "parts_store": 12, "car_market": 26, "town_market": 16, "warehouse": 20,
         "monument": 5, "sawmill": 22, "lumber_camp": 18, "barn": 20, "grain_elevator": 13, "cowshed": 26, "flour_mill": 18, "bakery": 12,
@@ -502,7 +543,7 @@ for t in trees[::3]:
     r, c = int(t[2] + HALF), int(t[0] + HALF)
     if 0 <= r < N and 0 <= c < N:
         pv[r, c] = [0.1, 0.35, 0.1]
-Image.fromarray((np.clip(pv, 0, 1) * 255).astype(np.uint8)).resize((1024, 1024)).save("/tmp/claude-0/-home-user/fd73911e-6d83-51a2-96d4-701326b1e3cf/scratchpad/map.png")
+Image.fromarray((np.clip(pv, 0, 1) * 255).astype(np.uint8)).resize((1024, 1024)).save(os.path.join(ROOT, "tools", "map_preview.png"))
 print("height range", h.min(), h.max())
 
 

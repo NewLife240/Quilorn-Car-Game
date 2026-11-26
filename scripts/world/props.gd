@@ -194,6 +194,7 @@ func _far_mesh(name: String) -> Mesh:
 			mesh.surface_set_material(s, MatLib.get_mat(key))
 		else:
 			var m := StandardMaterial3D.new()
+			m.cull_mode = BaseMaterial3D.CULL_DISABLED
 			m.vertex_color_use_as_albedo = true
 			m.albedo_color = Color(1, 1, 1)
 			m.roughness = 0.9

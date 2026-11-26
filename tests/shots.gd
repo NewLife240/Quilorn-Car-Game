@@ -48,6 +48,24 @@ func _ready() -> void:
 		var c0: Vector3 = pos + dir * 12.0 + dir * 9.0 + Vector3.UP * 1.6
 		views = [["wheels", "cam", c0, pos + dir * 12.0 + Vector3.UP * 0.6]]
 		return
+	if OS.get_cmdline_user_args().has("fb2"):
+		var kr: Dictionary = world.props.find_object("khrushchevka")
+		var kb := Basis(Vector3.UP, kr.rot)
+		var kp2 := Vector3(kr.x, kr.y, kr.z)
+		var gs: Dictionary = world.props.find_object("gas_station")
+		var gsb := Basis(Vector3.UP, gs.rot)
+		var gsp := Vector3(gs.x, gs.y, gs.z)
+		var sh: Dictionary = world.props.find_object("parts_store")
+		var shp := Vector3(sh.x, sh.y, sh.z)
+		car.in_steer = 0.8
+		views = [
+			["fb2_interior", "carfp", null, null],
+			["fb2_balcony", "cam", kp2 + kb * Vector3(-8, 2.0, 10), kp2 + kb * Vector3(-14, 8.0, 6.5)],
+			["fb2_entrance", "cam", kp2 + kb * Vector3(-12, 1.7, -12), kp2 + kb * Vector3(-18, 1.2, -6)],
+			["fb2_canopy", "cam", gsp + gsb * Vector3(0, 1.6, 1), gsp + gsb * Vector3(2, 6, -1)],
+			["fb2_shop", "cam", shp + Vector3(25, 6, -25), shp + Vector3(0, 4, 0)],
+		]
+		return
 	if OS.get_cmdline_user_args().has("fb"):
 		var kh: Dictionary = world.props.find_object("khata")
 		var kp := Vector3(kh.x, kh.y, kh.z)

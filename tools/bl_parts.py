@@ -3,8 +3,9 @@
 import bpy, bmesh, math, os
 from mathutils import Vector, Matrix
 
-OUT = "/home/user/rusty_roads/assets/parts"
-OUTP = "/home/user/rusty_roads/assets/props"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT = ROOT + "/assets/parts"
+OUTP = ROOT + "/assets/props"
 os.makedirs(OUT, exist_ok=True)
 os.makedirs(OUTP, exist_ok=True)
 

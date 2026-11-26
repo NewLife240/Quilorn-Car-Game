@@ -1,3 +1,4 @@
 .godot/
 build/
 *.tmp
+tools/map_preview.png

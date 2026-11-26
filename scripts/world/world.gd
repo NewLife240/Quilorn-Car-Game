@@ -23,6 +23,7 @@ var rain: GPUParticles3D
 var locations := {}
 var traffic: Node
 var ambience: Node
+var rain_hf: GPUParticlesCollisionHeightField3D
 var _light_t := 0.0
 
 
@@ -149,7 +150,17 @@ func _build_environment() -> void:
 	pm.initial_velocity_min = 16.0
 	pm.initial_velocity_max = 20.0
 	pm.gravity = Vector3(0, -9.8, 0)
+	pm.collision_mode = ParticleProcessMaterial.COLLISION_HIDE_ON_CONTACT
 	rain.process_material = pm
+	rain.collision_base_size = 0.02
+	# rain stops at roofs / car roofs: heightfield of the scene around the camera
+	rain_hf = GPUParticlesCollisionHeightField3D.new()
+	rain_hf.size = Vector3(60, 60, 60)
+	rain_hf.resolution = GPUParticlesCollisionHeightField3D.RESOLUTION_256
+	rain_hf.update_mode = GPUParticlesCollisionHeightField3D.UPDATE_MODE_ALWAYS
+	rain_hf.follow_camera_enabled = true
+	rain_hf.visible = false
+	add_child(rain_hf)
 	var qm := QuadMesh.new()
 	qm.size = Vector2(0.015, 0.45)
 	var rm := StandardMaterial3D.new()
@@ -266,6 +277,7 @@ func _update_weather(dt: float) -> void:
 		_weather_target = 1.0 if randf() < 0.22 else 0.0
 	weather = move_toward(weather, _weather_target, dt / 40.0)
 	rain.emitting = weather > 0.55
+	rain_hf.visible = rain.emitting
 	terrain.set_wetness(clampf(terrain.wetness + (0.004 if weather > 0.55 else -0.0015) * dt, 0.0, 1.0))
 
 

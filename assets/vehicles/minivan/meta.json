@@ -127,5 +127,6 @@
   "car4_grey.png",
   "car4_lightorange.png"
  ],
- "cargo": null
+ "cargo": null,
+ "cutout": false
 }

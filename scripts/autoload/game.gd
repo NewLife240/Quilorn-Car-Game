@@ -53,6 +53,13 @@ func _ready() -> void:
 	apply_window_settings()
 
 
+func _notification(what: int) -> void:
+	# Alt-Tab: pause and free the mouse instead of fighting the OS for the window
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and world != null and hud != null and is_instance_valid(hud):
+		if not get_tree().paused and hud.has_method("open_pause_menu"):
+			hud.open_pause_menu()
+
+
 func _process(delta: float) -> void:
 	if get_tree().paused or world == null:
 		return
@@ -172,7 +179,7 @@ func apply_window_settings() -> void:
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED if settings.vsync else DisplayServer.VSYNC_DISABLED)
 	Engine.max_fps = int(settings.fps_limit)
 	if not DisplayServer.get_name() == "headless":
-		var want := DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN if settings.fullscreen else DisplayServer.WINDOW_MODE_WINDOWED
+		var want := DisplayServer.WINDOW_MODE_FULLSCREEN if settings.fullscreen else DisplayServer.WINDOW_MODE_WINDOWED
 		if DisplayServer.window_get_mode() != want:
 			DisplayServer.window_set_mode(want)
 	var vp := get_viewport()

@@ -128,5 +128,6 @@
   "car_gray.png",
   "car_red.png"
  ],
- "cargo": null
+ "cargo": null,
+ "cutout": false
 }

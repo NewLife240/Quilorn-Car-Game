@@ -715,8 +715,10 @@ func buy_shop_item(id: String, at: Vector3) -> void:
 	var def := DB.part(id)
 	if Game.spend(int(def.price), "Bought " + def.name):
 		var d := {"cond": 100.0}
-		if id == "battery":
+		if id.begins_with("battery"):
 			d.charge = 100.0
+		if def.get("empty", false):
+			d.fill = 0.0
 		var p := at + Vector3(randf_range(-0.6, 0.6), 0.3 + randf() * 0.3, randf_range(-0.6, 0.6))
 		Item.spawn(world.dynamic_root, id, d, Transform3D(Basis.IDENTITY, p))
 
