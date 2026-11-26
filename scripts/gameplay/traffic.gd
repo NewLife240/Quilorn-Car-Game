@@ -66,8 +66,39 @@ func _spawn(rd: Dictionary, idx: int, dir: int) -> void:
 	body.add_child(cs)
 	for mi in body.find_children("*", "MeshInstance3D", true, false):
 		mi.visibility_range_end = 600.0
+	var lights := []
+	var hl_mat := StandardMaterial3D.new()
+	hl_mat.emission_enabled = true
+	hl_mat.emission = Color(1, 0.92, 0.7)
+	hl_mat.emission_energy_multiplier = 4.0
+	hl_mat.albedo_color = Color(1, 1, 0.9)
+	var r0: float = meta.wheels[0].radius
+	for sx in [-1, 1]:
+		var sl := SpotLight3D.new()
+		sl.position = Vector3(sx * meta.width * 0.3, r0 * 1.9, -meta.length * 0.5 - 0.05)
+		sl.spot_range = 35.0
+		sl.spot_angle = 30.0
+		sl.light_energy = 3.0
+		sl.light_color = Color(1.0, 0.92, 0.75)
+		sl.shadow_enabled = false
+		sl.distance_fade_enabled = true
+		sl.distance_fade_begin = 160.0
+		sl.distance_fade_length = 40.0
+		sl.visible = false
+		body.add_child(sl)
+		lights.append(sl)
+		var q := MeshInstance3D.new()
+		var qm := QuadMesh.new()
+		qm.size = Vector2(0.18, 0.12)
+		q.mesh = qm
+		q.material_override = hl_mat
+		q.position = sl.position + Vector3(0, 0, -0.02)
+		q.rotation.y = PI
+		q.visible = false
+		body.add_child(q)
+		lights.append(q)
 	add_child(body)
-	var car := {"body": body, "pts": rd.pts, "i": float(idx), "dir": dir, "speed": 0.0, "max": randf_range(13.0, 19.0), "wheels": wheels, "lane": 1.9 if rd.w >= 7 else 1.5, "radius": float(meta.wheels[0].radius), "len": float(meta.length)}
+	var car := {"body": body, "pts": rd.pts, "i": float(idx), "dir": dir, "speed": 0.0, "max": randf_range(13.0, 19.0), "wheels": wheels, "lane": 1.9 if rd.w >= 7 else 1.5, "radius": float(meta.wheels[0].radius), "len": float(meta.length), "lights": lights}
 	cars.append(car)
 	_place(car, 0.0)
 
@@ -129,3 +160,9 @@ func _physics_process(dt: float) -> void:
 			c.dir = -c.dir
 			c.i = clampf(c.i, 1.0, c.pts.size() - 2.0)
 		_place(c, dt)
+
+
+func set_night(on: bool) -> void:
+	for c in cars:
+		for l in c.lights:
+			l.visible = on

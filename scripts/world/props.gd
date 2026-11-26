@@ -1,8 +1,12 @@
 extends Node3D
 ## Places buildings, trees, grass and crops. Exposes interaction points from building models ("IP_*" nodes).
 
-const TREE_CHUNK := 256.0
-const RANGE_SMALL := ["fence_run", "well", "bus_stop", "power_pole", "shed", "wreck", "monument"]
+const TREE_CHUNK := 128.0
+const TREE_NEAR := 210.0
+const CONIFER := ["pine"]
+const FAR_SHAPE := {"pine": Vector3(1, 1, 1), "oak": Vector3(1, 1, 1), "birch": Vector3(0.7, 1.15, 0.7), "poplar": Vector3(0.55, 1.5, 0.55), "willow": Vector3(0.95, 0.8, 0.95), "acacia": Vector3(0.85, 0.85, 0.85), "apple": Vector3(0.45, 0.45, 0.45)}
+var street_lights: Array[OmniLight3D] = []
+const RANGE_SMALL := ["fence_run", "well", "bus_stop", "power_pole", "shed", "wreck", "monument", "street_lamp"]
 const RANGE_BIG := ["khrushchevka", "grain_elevator", "church", "warehouse", "furniture_factory", "flour_mill", "cowshed"]
 var _tree_bodies: Array[RID] = []
 var _trunk_shape: RID
@@ -67,6 +71,19 @@ func _build_buildings() -> void:
 			m.visibility_range_end_margin = 50.0
 			m.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
 		for n in inst.find_children("IP_*", "", true, false):
+			if String(n.name) == "IP_streetlight":
+				var l := OmniLight3D.new()
+				l.omni_range = 17.0
+				l.light_energy = 1.8
+				l.light_color = Color(1.0, 0.82, 0.55)
+				l.shadow_enabled = false
+				l.distance_fade_enabled = true
+				l.distance_fade_begin = 140.0
+				l.distance_fade_length = 40.0
+				l.visible = false
+				n.add_child(l)
+				street_lights.append(l)
+				continue
 			ips.append({"name": String(n.name).substr(3), "node": n, "obj": o})
 
 
@@ -86,6 +103,7 @@ func _build_trees() -> void:
 				meshes[ty] = (mi[0] as MeshInstance3D).mesh
 				MatLib.apply_mesh(meshes[ty])
 			sc.free()
+	var far_mesh := {"conifer": _far_mesh("pine_lod"), "broad": _far_mesh("oak_lod")}
 	# bucket by chunk & type
 	var buckets := {}
 	for t in trees:
@@ -105,6 +123,7 @@ func _build_trees() -> void:
 		PhysicsServer3D.body_set_collision_layer(body, 1)
 		PhysicsServer3D.body_set_collision_mask(body, 0)
 		_tree_bodies.append(body)
+		var far := {"conifer": [], "broad": []}
 		for ty in buckets[key].keys():
 			var arr: Array = buckets[key][ty]
 			var mm := MultiMesh.new()
@@ -115,16 +134,72 @@ func _build_trees() -> void:
 				var t: Array = arr[i]
 				var s: float = t[4]
 				var p := Vector3(t[0], world.terrain.height_at(t[0], t[2]) - 0.15, t[2])
-				mm.set_instance_transform(i, Transform3D(Basis(Vector3.UP, t[5]).scaled(Vector3(s, s, s)), p - center))
+				var xf := Transform3D(Basis(Vector3.UP, t[5]).scaled(Vector3(s, s, s)), p - center)
+				mm.set_instance_transform(i, xf)
+				var fs: Vector3 = FAR_SHAPE.get(ty, Vector3.ONE) * s
+				far["conifer" if ty in CONIFER else "broad"].append([Transform3D(Basis(Vector3.UP, t[5]).scaled(fs), p - center), MatLib.LEAVES.get(_leaf_key(ty), Color(0.25, 0.42, 0.14))])
 				if ty != "apple":
 					PhysicsServer3D.body_add_shape(body, _trunk_shape, Transform3D(Basis.IDENTITY, p + Vector3.UP * 2.5))
 			var mmi := MultiMeshInstance3D.new()
 			mmi.multimesh = mm
 			mmi.position = center
-			mmi.visibility_range_end = 1300.0
+			mmi.visibility_range_end = TREE_NEAR
+			mmi.visibility_range_end_margin = 10.0
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+			mmi.set_meta("near", true)
 			add_child(mmi)
 			_tree_mmis.append(mmi)
+		# distant stand-ins: one draw call per chunk and family, no shadows
+		for fam in far.keys():
+			var lst: Array = far[fam]
+			if lst.is_empty():
+				continue
+			var mm2 := MultiMesh.new()
+			mm2.transform_format = MultiMesh.TRANSFORM_3D
+			mm2.use_colors = true
+			mm2.mesh = far_mesh[fam]
+			mm2.instance_count = lst.size()
+			for i in range(lst.size()):
+				mm2.set_instance_transform(i, lst[i][0])
+				mm2.set_instance_color(i, lst[i][1])
+			var fm := MultiMeshInstance3D.new()
+			fm.multimesh = mm2
+			fm.position = center
+			fm.visibility_range_begin = TREE_NEAR
+			fm.visibility_range_begin_margin = 10.0
+			fm.visibility_range_end = 1300.0
+			fm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			add_child(fm)
+			_tree_mmis.append(fm)
+
+
+func _leaf_key(ty: String) -> String:
+	match ty:
+		"pine": return "needles"
+		"birch": return "leaves_light"
+		"willow": return "leaves_willow"
+		"apple": return "leaves_apple"
+		"oak": return "leaves_dark"
+	return "leaves"
+
+
+func _far_mesh(name: String) -> Mesh:
+	var sc: Node3D = load("res://assets/nature/%s.glb" % name).instantiate()
+	var mesh: Mesh = (sc.find_children("*", "MeshInstance3D", true, false)[0] as MeshInstance3D).mesh
+	sc.free()
+	for s in range(mesh.get_surface_count()):
+		var src := mesh.surface_get_material(s)
+		var key := String(src.resource_name) if src else ""
+		if key.begins_with("bark"):
+			mesh.surface_set_material(s, MatLib.get_mat(key))
+		else:
+			var m := StandardMaterial3D.new()
+			m.vertex_color_use_as_albedo = true
+			m.albedo_color = Color(1, 1, 1)
+			m.roughness = 0.9
+			m.diffuse_mode = BaseMaterial3D.DIFFUSE_LAMBERT_WRAP
+			mesh.surface_set_material(s, m)
+	return mesh
 
 
 func _exit_tree() -> void:
@@ -148,7 +223,7 @@ func _build_vegetation_particles() -> void:
 		gp.name = sp.name
 		var side := int(sp.radius * 2.0 / sp.spacing)
 		gp.amount = side * side
-		gp.lifetime = 1.0
+		gp.lifetime = 600.0
 		gp.explosiveness = 1.0
 		gp.fixed_fps = 0
 		gp.interpolate = false
@@ -265,7 +340,8 @@ func apply_settings(s: Dictionary) -> void:
 		gp.restart()
 	var vd: float = s.view_distance
 	for m in _tree_mmis:
-		m.visibility_range_end = 1300.0 * vd
+		if not m.has_meta("near"):
+			m.visibility_range_end = 1300.0 * vd
 
 
 func _process(_dt: float) -> void:

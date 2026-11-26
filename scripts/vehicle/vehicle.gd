@@ -369,7 +369,7 @@ func _build_slots() -> void:
 
 func _build_interact_areas() -> void:
 	var b := _bay()
-	_interact_hood = _mk_area("hood", Vector3(0, b.end.y + 0.02, b.get_center().z), Vector3(b.size.x + 0.1, 0.12, b.size.z + 0.05))
+	_interact_hood = _mk_area("hood", Vector3(0, b.end.y + 0.02, b.get_center().z), Vector3(b.size.x + 0.1, 0.32, b.size.z + 0.05))
 	if hood_node:
 		var xf := _interact_hood.transform
 		remove_child(_interact_hood)
@@ -822,7 +822,7 @@ func _physics_process(dt: float) -> void:
 			starter_t = 70.0 * slot_q("starter") * (1.0 if cls == "small" else 3.5) * clampf(bat / 40.0, 0.3, 1.0)
 			_battery_add(-1.4 * dt)
 			if engine_rpm > 140.0 and can_run():
-				var p := 1.6 * slot_q("ignition_coil") * slot_q("spark_plugs") * clampf(slot_q("carburetor") + 0.2, 0.0, 1.0)
+				var p := 0.35 + 1.6 * slot_q("ignition_coil") * slot_q("spark_plugs") * clampf(slot_q("carburetor") + 0.2, 0.0, 1.0)
 				if randf() < p * dt * 2.0:
 					running = true
 					cranking = false
@@ -1204,6 +1204,7 @@ func _impact_check(dt: float) -> void:
 	_prev_vel = linear_velocity
 	if acc > 70.0 and dt > 0.0:
 		var sev := clampf((acc - 70.0) / 200.0, 0.0, 1.0)
+		play_fx("res://assets/sounds/ui/crash.ogg", lerpf(-10.0, 2.0, sev))
 		if not cargo.is_empty():
 			for c in cargo:
 				c.cond = maxf(0.0, float(c.cond) - sev * 25.0)

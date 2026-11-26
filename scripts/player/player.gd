@@ -24,6 +24,13 @@ var _ghost_slot: PartSlot = null
 var _audio: AudioStreamPlayer3D
 var _target: Object = null
 var _crouch := 0.0
+var _step_acc := 0.0
+var _steps: AudioStreamPlayer
+var _was_floor := true
+var _fall_v := 0.0
+var swimming := false
+const STEP_SETS := {"ground": ["ground_1", "ground_2"], "wet": ["wet_1", "wet_2", "wet_3"], "wood": ["wood_1", "wood_2", "wood_3", "wood_4"]}
+var _step_streams := {}
 
 
 func _ready() -> void:
@@ -59,6 +66,11 @@ func _ready() -> void:
 	cam.add_child(hold_point)
 	_audio = AudioStreamPlayer3D.new()
 	add_child(_audio)
+	_steps = AudioStreamPlayer.new()
+	_steps.max_polyphony = 2
+	add_child(_steps)
+	for k in STEP_SETS.keys():
+		_step_streams[k] = STEP_SETS[k].map(func(n): return load("res://assets/sounds/steps/%s.ogg" % n))
 	Game.settings_changed.connect(func(): cam.fov = Game.settings.fov)
 	cam.fov = Game.settings.fov
 
@@ -110,14 +122,31 @@ func _physics_process(dt: float) -> void:
 	_crouch = move_toward(_crouch, 1.0 if Input.is_action_pressed("crouch") and not Game.ui_open else 0.0, dt * 5.0)
 	spd *= lerpf(1.0, 0.5, _crouch)
 	var dir := (global_basis * Vector3(input.x, 0, input.y)).normalized()
-	var accel := 12.0 if is_on_floor() else 2.5
+	# water: wade slowly, swim when deep
+	var wl: float = Game.world.terrain.water_level if Game.world else -100.0
+	var depth := wl - global_position.y
+	swimming = depth > 1.25
+	if depth > 0.4:
+		spd *= clampf(1.0 - (depth - 0.4) * 0.6, 0.45, 1.0)
+	var accel := 12.0 if is_on_floor() or swimming else 2.5
 	velocity.x = move_toward(velocity.x, dir.x * spd, accel * spd * dt)
 	velocity.z = move_toward(velocity.z, dir.z * spd, accel * spd * dt)
-	if not is_on_floor():
+	if swimming:
+		var target_y := wl - 1.4
+		if Input.is_action_pressed("jump"):
+			target_y = wl - 1.1
+		velocity.y = clampf((target_y - global_position.y) * 2.5, -2.0, 2.0)
+	elif not is_on_floor():
 		velocity.y -= 9.81 * dt
+		_fall_v = minf(_fall_v, velocity.y)
 	elif Input.is_action_just_pressed("jump") and not Game.ui_open:
 		velocity.y = JUMP
 	move_and_slide()
+	if is_on_floor() and not _was_floor and _fall_v < -3.0:
+		_play_step(1.0)
+	if is_on_floor():
+		_fall_v = 0.0
+	_was_floor = is_on_floor()
 	# push rigid bodies (cars, items)
 	for i in range(get_slide_collision_count()):
 		var c := get_slide_collision(i)
@@ -125,11 +154,21 @@ func _physics_process(dt: float) -> void:
 		if rb and rb != held:
 			var push := -c.get_normal()
 			push.y = 0
-			rb.apply_impulse(push * (6.0 if rb is Vehicle else 1.5) * dt * 60.0 * (0.2 if rb is Vehicle else 1.0), c.get_position() - rb.global_position)
+			if rb is Vehicle:
+				rb.apply_impulse(push * 72.0 * dt, c.get_position() - rb.global_position)
+			else:
+				rb.apply_central_impulse(push * minf(rb.mass, 8.0) * 0.6 * dt)
 	# head bob & crouch
 	var hv := Vector2(velocity.x, velocity.z).length()
-	if is_on_floor() and hv > 0.5:
+	if (is_on_floor() or swimming) and hv > 0.5:
 		_bob += dt * hv * 2.2
+		_step_acc += hv * dt
+		var stride := 1.9 if hv > 5.0 else 1.45
+		if swimming:
+			stride = 2.6
+		if _step_acc > stride:
+			_step_acc = 0.0
+			_play_step(clampf(hv / 6.0, 0.4, 1.0))
 	head.position.y = lerpf(1.65, 1.05, _crouch) + sin(_bob) * 0.03 * clampf(hv / 4.0, 0, 1)
 	# carried item follows the hold point
 	if held:
@@ -164,7 +203,14 @@ func _process(dt: float) -> void:
 func _update_target() -> void:
 	hint = ""
 	info = ""
-	var col: Object = ray.get_collider() if ray.is_colliding() else null
+	var q := PhysicsRayQueryParameters3D.create(cam.global_position, cam.global_position - cam.global_basis.z * REACH, 1 | (1 << 2) | (1 << 4))
+	q.collide_with_areas = true
+	var ex: Array[RID] = [get_rid()]
+	if held:
+		ex.append(held.get_rid())
+	q.exclude = ex
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	var col: Object = hit.get("collider") if hit else null
 	_target = col
 	if _ghost_slot:
 		_ghost_slot.show_ghost(false)
@@ -300,10 +346,35 @@ func _continuous_actions(dt: float) -> void:
 
 
 func _click() -> void:
-	_audio.stream = load("res://assets/sounds/Car_Parking_Brake.ogg")
-	_audio.volume_db = -12
-	_audio.pitch_scale = randf_range(1.6, 2.0)
+	_audio.stream = load("res://assets/sounds/ui/wrench.ogg")
+	_audio.volume_db = -8
+	_audio.pitch_scale = randf_range(1.3, 1.6)
 	_audio.play()
+
+
+func _play_step(strength: float) -> void:
+	var kind := "ground"
+	var t: Terrain = Game.world.terrain if Game.world else null
+	var wl: float = t.water_level if t else -100.0
+	var q := PhysicsRayQueryParameters3D.create(global_position + Vector3.UP * 0.3, global_position + Vector3.DOWN * 0.6, 1 | 2)
+	q.exclude = [get_rid()]
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	if global_position.y < wl + 0.1:
+		kind = "wet"
+	elif hit and hit.collider and hit.collider.has_meta("terrain") and t:
+		var sf := t.surface(global_position.x, global_position.z)
+		if sf.mud > 0.35 or t.wetness > 0.45:
+			kind = "wet"
+	elif hit and hit.collider and not hit.collider.has_meta("terrain"):
+		var n: Node = hit.collider
+		var nm := String(n.get_parent().name if n.get_parent() else n.name)
+		if nm.begins_with("home_house") or nm.begins_with("khata") or nm.begins_with("sawmill") or nm.begins_with("lumber"):
+			kind = "wood"
+	var arr: Array = _step_streams[kind]
+	_steps.stream = arr.pick_random()
+	_steps.pitch_scale = randf_range(0.9, 1.1)
+	_steps.volume_db = lerpf(-20.0, -7.0, strength) + (2.0 if kind == "wet" else 0.0)
+	_steps.play()
 
 
 func _on_grab() -> void:
@@ -339,6 +410,12 @@ func _on_grab() -> void:
 
 func _grab(it: Item) -> void:
 	held = it
+	add_collision_exception_with(it)
+	it.add_collision_exception_with(self)
+	_audio.stream = load("res://assets/sounds/ui/pickup.ogg")
+	_audio.volume_db = -10
+	_audio.pitch_scale = randf_range(0.9, 1.1)
+	_audio.play()
 	it.held = true
 	it.gravity_scale = 0.0
 	it.sleeping = false
@@ -350,6 +427,8 @@ func _release() -> void:
 	if held == null:
 		return
 	held.held = false
+	remove_collision_exception_with(held)
+	held.remove_collision_exception_with(self)
 	held.gravity_scale = 1.0
 	held.collision_mask = 1 | (1 << 1) | (1 << 2)
 	ray.remove_exception(held)

@@ -85,6 +85,7 @@ static func label(text: String, size := 18, col := Color(0.92, 0.92, 0.92), bold
 static func button(text: String, cb: Callable, min_w := 0) -> Button:
 	var b := Button.new()
 	b.text = text
+	b.pressed.connect(func(): Game.ui_sound("click"))
 	b.pressed.connect(cb)
 	if min_w > 0:
 		b.custom_minimum_size.x = min_w

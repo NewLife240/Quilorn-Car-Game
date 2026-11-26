@@ -71,8 +71,8 @@ func _build_sites() -> void:
 				_add_interact(node, "Manage " + industries[site_key].name, _open_office.bind(site_key), Vector3(1.2, 2.0, 1.2))
 			elif ipn == "bed":
 				_add_interact(node, "Sleep until morning (saves game)", _sleep, Vector3(1.5, 2.0, 1.5))
-			elif ipn == "workbench":
-				_add_interact(node, "Battery charger - charge batteries on the bench (₴5)", _charge_batteries.bind(node), Vector3(1.0, 0.6, 2.2))
+			elif ipn == "charger":
+				_add_interact(node, "Battery charger - charges batteries lying on the bench (₴5)", _charge_batteries.bind(node), Vector3(0.42, 0.35, 0.36))
 			elif ipn == "light":
 				var l := OmniLight3D.new()
 				l.omni_range = 9.0
@@ -125,38 +125,72 @@ func _add_interact(at: Node3D, text: String, cb: Callable, size: Vector3) -> Are
 
 
 func _add_zone(p: Vector3, kind: String, site: String) -> void:
+	p = _off_road(p, site)
 	_zones.append({"pos": p, "kind": kind, "site": site, "radius": 7.0})
-	_add_marker(p, Color(1.0, 0.8, 0.1) if kind == "load" else Color(0.2, 1.0, 0.4), "LOAD" if kind == "load" else "UNLOAD")
+	var nm := site_name(site) if (industries.has(site) or consumers.has(site)) else site
+	_add_marker(p, Color(1.0, 0.8, 0.1) if kind == "load" else Color(0.2, 1.0, 0.4), ("LOAD  " if kind == "load" else "UNLOAD  ") + nm)
+
+
+## Push a zone off the road surface towards its site so markers sit on the yard, not on the asphalt.
+func _off_road(p: Vector3, site: String) -> Vector3:
+	var center := p
+	if industries.has(site):
+		center = industries[site].pos
+	elif consumers.has(site):
+		center = consumers[site].pos
+	for i in range(12):
+		var nr: Array = world.roads.nearest(p)
+		var rw := 4.0
+		if int(nr[3]) >= 0:
+			rw = float(world.roads.data[nr[3]].w) * 0.5
+		if float(nr[0]) > rw + 7.5:
+			break
+		var away: Vector3 = (p - (nr[1] as Vector3))
+		away.y = 0
+		if away.length() < 0.1:
+			away = (center - p)
+		p += away.normalized() * 2.0
+	return world.ground(p)
 
 
 func _add_marker(p: Vector3, col: Color, label: String) -> void:
+	# subtle painted ring on the ground + a small sign post
 	var mi := MeshInstance3D.new()
 	var tm := TorusMesh.new()
-	tm.inner_radius = 6.6
+	tm.inner_radius = 6.75
 	tm.outer_radius = 7.0
 	tm.rings = 48
+	tm.ring_segments = 4
 	mi.mesh = tm
 	var m := StandardMaterial3D.new()
-	m.albedo_color = col
+	m.albedo_color = Color(col.r, col.g, col.b, 0.55)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.emission_enabled = true
-	m.emission = col
 	mi.material_override = m
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	mi.scale = Vector3(1, 0.05, 1)
+	mi.scale = Vector3(1, 0.02, 1)
+	mi.visibility_range_end = 150.0
 	world.add_child(mi)
-	mi.global_position = world.ground(p) + Vector3.UP * 0.15
+	mi.global_position = world.ground(p) + Vector3.UP * 0.06
+	var post := MeshInstance3D.new()
+	var pm := BoxMesh.new()
+	pm.size = Vector3(0.08, 1.8, 0.08)
+	post.mesh = pm
+	post.material_override = MatLib.get_mat("metal")
+	world.add_child(post)
+	var edge: Vector3 = world.ground(p + Vector3(6.9, 0, 0))
+	post.global_position = edge + Vector3.UP * 0.9
 	var l := Label3D.new()
 	l.text = label
-	l.font_size = 64
-	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	l.modulate = col
-	l.outline_size = 12
-	l.fixed_size = false
-	l.pixel_size = 0.01
-	l.visibility_range_end = 120.0
+	l.font_size = 40
+	l.pixel_size = 0.006
+	l.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+	l.modulate = col.lightened(0.3)
+	l.outline_size = 10
+	l.shaded = false
+	l.visibility_range_end = 45.0
 	world.add_child(l)
-	l.global_position = world.ground(p) + Vector3.UP * 3.0
+	l.global_position = edge + Vector3.UP * 2.05
 
 
 func zone_at(p: Vector3) -> Dictionary:
@@ -517,7 +551,7 @@ func _sleep(_p) -> void:
 func _charge_batteries(_p, node: Node3D) -> void:
 	var n := 0
 	for c in world.dynamic_root.get_children():
-		if c is Item and c.item_id == "battery" and c.global_position.distance_to(node.global_position) < 2.0:
+		if c is Item and c.item_id == "battery" and c.global_position.distance_to(node.global_position) < 2.6:
 			c.data.charge = 100.0 * float(c.data.get("cond", 100)) / 100.0
 			n += 1
 	if n == 0:

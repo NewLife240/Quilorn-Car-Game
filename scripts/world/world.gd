@@ -21,6 +21,8 @@ var _weather_target := 0.0
 var _weather_timer := 0.0
 var rain: GPUParticles3D
 var locations := {}
+var traffic: Node
+var ambience: Node
 var _light_t := 0.0
 
 
@@ -50,10 +52,14 @@ func _ready() -> void:
 	economy.name = "Economy"
 	add_child(economy)
 	economy.setup(self)
-	var traffic := preload("res://scripts/gameplay/traffic.gd").new()
+	traffic = preload("res://scripts/gameplay/traffic.gd").new()
 	traffic.name = "Traffic"
 	add_child(traffic)
 	traffic.setup(self)
+	ambience = preload("res://scripts/world/ambience.gd").new()
+	ambience.name = "Ambience"
+	add_child(ambience)
+	ambience.setup(self)
 	player = Player.new()
 	player.name = "Player"
 	add_child(player)
@@ -81,7 +87,8 @@ func _build_environment() -> void:
 	sky_mat.sky_horizon_color = Color(0.66, 0.74, 0.82)
 	sky_mat.ground_bottom_color = Color(0.2, 0.22, 0.2)
 	sky_mat.ground_horizon_color = Color(0.62, 0.68, 0.72)
-	sky_mat.sun_angle_max = 20.0
+	sky_mat.sun_angle_max = 2.5
+	sky_mat.sun_curve = 0.06
 	sky_mat.sky_curve = 0.12
 	sky.sky_material = sky_mat
 	sky.radiance_size = Sky.RADIANCE_SIZE_256
@@ -112,6 +119,7 @@ func _build_environment() -> void:
 	sun.light_color = Color(1.0, 0.95, 0.86)
 	sun.light_energy = 1.25
 	sun.shadow_enabled = true
+	sun.light_angular_distance = 0.5
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
 	sun.directional_shadow_max_distance = 220.0
 	sun.directional_shadow_split_1 = 0.06
@@ -126,6 +134,7 @@ func _build_environment() -> void:
 	moon.light_energy = 0.0
 	moon.shadow_enabled = false
 	moon.rotation = Vector3(deg_to_rad(-50), deg_to_rad(30), 0)
+	moon.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
 	add_child(moon)
 	# rain
 	rain = GPUParticles3D.new()
@@ -234,14 +243,19 @@ func _update_daylight() -> void:
 	sun.light_energy = day * lerpf(1.35, 0.7, weather)
 	sun.light_color = Color(1.0, 0.95, 0.86).lerp(Color(1.0, 0.62, 0.36), golden * 0.8)
 	sun.visible = day > 0.01
-	moon.light_energy = (1.0 - day) * 0.12
+	moon.light_energy = (1.0 - day) * 0.2
+	moon.visible = day < 0.95
+	var night := day < 0.3 or weather > 0.85
+	for l in props.street_lights:
+		l.visible = night
+	traffic.set_night(night)
 	var overcast := weather
 	sky_mat.sky_top_color = Color(0.03, 0.05, 0.1).lerp(Color(0.26, 0.46, 0.78).lerp(Color(0.42, 0.46, 0.5), overcast), day)
 	sky_mat.sky_horizon_color = Color(0.05, 0.07, 0.12).lerp(Color(0.68, 0.74, 0.82).lerp(Color(0.95, 0.65, 0.45), golden * 0.6).lerp(Color(0.55, 0.57, 0.6), overcast), day)
 	sky_mat.ground_horizon_color = sky_mat.sky_horizon_color
 	env.fog_light_color = sky_mat.sky_horizon_color
 	env.fog_depth_begin = lerpf(250.0, 60.0, overcast)
-	env.ambient_light_energy = lerpf(0.25, 1.0, day)
+	env.ambient_light_energy = lerpf(0.42, 1.0, day)
 	env.background_energy_multiplier = lerpf(0.35, 1.0, day)
 
 

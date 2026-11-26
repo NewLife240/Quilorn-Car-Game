@@ -75,6 +75,9 @@ Regenerate content: `python3 tools/world_gen.py`, `blender -b --python tools/bl_
 - Car models: *PSX Style Cars* by GGBot (CC0), *Free Low Poly Vehicles Pack* by rgsdev (CC0),
   *Extremely low poly Soviet vehicles* pack (CC0) - via OpenGameArt.org
 - Car sound effects: GGBot PSX Style Cars pack (CC0)
+- Footsteps, impacts, river, thunder: *100 CC0 SFX #2* (OpenGameArt, CC0)
+- Rain: *Rain loopable* (OpenGameArt, CC0); birds & wind: *Park ambiences* (CC0); crickets: *Crickets ambient noise* (CC0)
+- UI clicks: *51 UI sound effects* (CC0)
 - PBR textures: ambientCG.com (CC0)
 - Font: DejaVu Sans (Bitstream Vera license)
 - Everything else (buildings, trees, parts, interiors, world, code) generated for this project.

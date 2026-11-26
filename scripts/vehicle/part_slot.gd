@@ -31,7 +31,7 @@ func setup(p_name: String, p_vehicle: Node, p_size: Vector3) -> void:
 	monitorable = true
 	_shape = CollisionShape3D.new()
 	var b := BoxShape3D.new()
-	b.size = size
+	b.size = size.max(Vector3(0.26, 0.26, 0.26))   # Jolt misses very thin area shapes
 	_shape.shape = b
 	add_child(_shape)
 	mount = Node3D.new()

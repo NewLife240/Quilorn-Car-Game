@@ -61,7 +61,7 @@ void place(uint index, inout mat4 xf, inout vec4 custom, inout bool active) {
 	mat3 rot = mat3(vec3(cos(a), 0.0, -sin(a)), vec3(0.0, 1.0, 0.0), vec3(sin(a), 0.0, cos(a)));
 	xf = mat4(vec4(rot[0] * sc, 0.0), vec4(rot[1] * sc, 0.0), vec4(rot[2] * sc, 0.0), vec4(p.x, h - rut * 0.2 - 0.02, p.y, 1.0));
 	custom = vec4(h1, h2, h3, 0.0);
-	active = sc > 0.001;
+	active = true;
 }
 
 void start() { place(INDEX, TRANSFORM, CUSTOM, ACTIVE); COLOR = vec4(1.0); }

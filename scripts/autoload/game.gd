@@ -33,6 +33,19 @@ var settings := {
 var _last_hour := -1
 
 
+var _ui_player: AudioStreamPlayer
+
+
+func ui_sound(name: String) -> void:
+	if _ui_player == null:
+		_ui_player = AudioStreamPlayer.new()
+		_ui_player.process_mode = Node.PROCESS_MODE_ALWAYS
+		add_child(_ui_player)
+	_ui_player.stream = load("res://assets/sounds/ui/%s.ogg" % name)
+	_ui_player.volume_db = -8.0
+	_ui_player.play()
+
+
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_setup_input()

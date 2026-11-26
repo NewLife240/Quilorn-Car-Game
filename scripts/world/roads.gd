@@ -46,6 +46,18 @@ func _ribbon(t: Terrain, pts: Array, w: float, lift: float, lanes: bool) -> Arra
 		if clean.is_empty() or Vector2(q[0] - clean[-1][0], q[2] - clean[-1][2]).length() > 1.2:
 			clean.append(q)
 	pts = clean
+	# smooth centre-line heights (removes the wavy look on climbs)
+	var hc := PackedFloat32Array()
+	for q in pts:
+		hc.append(t.height_at(q[0], q[2]))
+	var hs := PackedFloat32Array()
+	for i in range(hc.size()):
+		var acc := 0.0
+		var n := 0
+		for j in range(maxi(0, i - 3), mini(hc.size(), i + 4)):
+			acc += hc[j]
+			n += 1
+		hs.append(maxf(acc / n, hc[i] - 0.05))
 	for i in range(pts.size()):
 		var p := Vector3(pts[i][0], 0, pts[i][2])
 		var a := Vector3(pts[maxi(i - 2, 0)][0], 0, pts[maxi(i - 2, 0)][2])
@@ -61,7 +73,7 @@ func _ribbon(t: Terrain, pts: Array, w: float, lift: float, lanes: bool) -> Arra
 			var edge := k < 0 or k > across
 			var fc := clampf(f, 0.0, 1.0)
 			var q := p + nrm * (fc - 0.5) * w
-			q.y = t.height_at(q.x, q.z) + lift
+			q.y = maxf(hs[i] - absf(fc - 0.5) * 0.12, t.height_at(q.x, q.z) - 0.18) + lift
 			if edge:
 				q += nrm * (0.45 if k > across else -0.45)
 				q.y -= 0.32

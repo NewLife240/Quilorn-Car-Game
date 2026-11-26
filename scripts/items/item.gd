@@ -29,6 +29,9 @@ func _ready() -> void:
 	can_sleep = true
 	continuous_cd = mass < 3.0
 	set_meta("item", true)
+	contact_monitor = true
+	max_contacts_reported = 1
+	body_entered.connect(_on_hit)
 	var ps: PackedScene = load(def.mesh)
 	model = ps.instantiate()
 	add_child(model)
@@ -55,7 +58,7 @@ func _ready() -> void:
 		cs.rotation.z = PI / 2
 	else:
 		var bs := BoxShape3D.new()
-		bs.size = aabb.size.max(Vector3(0.05, 0.05, 0.05))
+		bs.size = aabb.size.max(Vector3(0.14, 0.14, 0.14))
 		cs.shape = bs
 	cs.position = aabb.get_center()
 	add_child(cs)
@@ -83,3 +86,24 @@ func display_name() -> String:
 
 func save_state() -> Dictionary:
 	return {"id": item_id, "data": data, "xf": var_to_str(global_transform), "price": shop_price}
+
+
+var _snd_t := 0
+var _snd: AudioStreamPlayer3D
+
+
+func _on_hit(_b: Node) -> void:
+	var now := Time.get_ticks_msec()
+	var v := linear_velocity.length()
+	if held or now - _snd_t < 180 or v < 1.2:
+		return
+	_snd_t = now
+	if _snd == null:
+		_snd = AudioStreamPlayer3D.new()
+		_snd.unit_size = 4.0
+		add_child(_snd)
+	var metal := mass > 3.0 and not item_id.begins_with("wheel") and not item_id.ends_with("bottle")
+	_snd.stream = load("res://assets/sounds/ui/drop_metal.ogg" if metal else "res://assets/sounds/ui/thud.ogg")
+	_snd.volume_db = clampf(-22.0 + v * 4.0, -22.0, 0.0)
+	_snd.pitch_scale = clampf(1.4 - mass / 120.0, 0.6, 1.5) * randf_range(0.92, 1.08)
+	_snd.play()

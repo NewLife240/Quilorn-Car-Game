@@ -261,9 +261,34 @@ place("home_house", L["x"] - 12, L["z"] + 14, 0.0)
 place("garage", L["x"] + 10, L["z"] + 8, 0.0)
 place("shed", L["x"] - 22, L["z"] - 6, 0.0)
 place("spawn_player", L["x"] + 10, L["z"] - 4, 0.0)
-# village khatas along the street (both sides of highway & gravel road)
+# village khatas along the street (both sides of highway & gravel road), with fenced yards
+BUILT = []   # (x, z, radius) of placed buildings for overlap checks
+
+
+def free_spot(px, pz, r, road_margin=3.0):
+    ri, ci = int(round(pz + HALF)), int(round(px + HALF))
+    if not (0 <= ri < N and 0 <= ci < N):
+        return False
+    # distance from the footprint edge to the nearest road edge
+    if dist[ri, ci] - hw[ri, ci] < r + road_margin:
+        return False
+    for bx, bz, br in BUILT:
+        if np.hypot(px - bx, pz - bz) < r + br + 2.0:
+            return False
+    if river_d[ri, ci] < r + 12:
+        return False
+    return True
+
+
+def local_to_world(cx, cz, yaw, lx, lz):
+    c, s_ = math.cos(yaw), math.sin(yaw)
+    return cx + lx * c + lz * s_, cz - lx * s_ + lz * c
+
+
 village_types = ["khata", "khata_b", "khata", "khata_tin"]
 vi = 0
+BUILT.append((LOC["home"]["x"], LOC["home"]["z"], 40))
+BUILT.append((LOC["gas_west"]["x"], LOC["gas_west"]["z"], 25))
 for rd_idx, spans in [(0, (-430, -60)), (3, (-180, 0))]:
     d = ROADS[rd_idx]["dense"]
     last = None
@@ -273,21 +298,23 @@ for rd_idx, spans in [(0, (-430, -60)), (3, (-180, 0))]:
             continue
         if rd_idx == 3 and not (300 < z < 470 and x < 0):
             continue
-        if last is not None and np.hypot(x - last[0], z - last[1]) < 34:
+        if last is not None and np.hypot(x - last[0], z - last[1]) < 30:
             continue
         j = min(i + 2, len(d) - 1)
         t = d[j] - d[max(i - 2, 0)]
         t = t / (np.linalg.norm(t) + 1e-6)
         n = np.array([-t[1], t[0]])
         for side in (-1, 1):
-            px, pz = np.array([x, z]) + n * side * 20
-            if np.hypot(px - LOC["home"]["x"], pz - LOC["home"]["z"]) < 55:
-                continue
-            if np.hypot(px - LOC["gas_west"]["x"], pz - LOC["gas_west"]["z"]) < 40:
+            px, pz = np.array([x, z]) + n * side * 21
+            if not free_spot(px, pz, 13.0, 1.0):
                 continue
             yaw = math.atan2(n[0] * side, n[1] * side)
             place(village_types[vi % 4], px, pz, yaw)
-            place("fence_run", px - n[0] * side * 7.5, pz - n[1] * side * 7.5, yaw, length=18)
+            BUILT.append((px, pz, 13.0))
+            # yard fence: front (with gate), both sides and back
+            for (lx, lz, L, rot) in [(0, -8.5, 20, 0.0), (-10, 1.5, 20, math.pi / 2), (10, 1.5, 20, math.pi / 2), (0, 11.5, 20, 0.0)]:
+                fx, fz = local_to_world(px, pz, yaw, lx, lz)
+                place("fence_run", fx, fz, yaw + rot, length=L, yard=True)
             vi += 1
         last = (x, z)
 L = LOC["village"]
@@ -340,6 +367,28 @@ for i in range(0, len(d), 120):
     px, pz = np.array([x, z]) + n * 9
     place("power_pole", px, pz, math.atan2(t[0], t[1]))
 
+# street lamps along village and town streets
+for rd_idx, keep in [(0, lambda x, z: -430 < x < 330), (3, lambda x, z: z < 470), (1, lambda x, z: True), (13, lambda x, z: True), (14, lambda x, z: True), (15, lambda x, z: True), (16, lambda x, z: True)]:
+    d = ROADS[rd_idx]["dense"]
+    w2 = ROADS[rd_idx]["w"] / 2
+    k = 0
+    for i in range(0, len(d), 90):
+        x, z = d[i]
+        if not keep(x, z):
+            continue
+        if rd_idx == 0 and not (-430 < x < -60 or 120 < x < 330):
+            continue
+        j = min(i + 2, len(d) - 1)
+        t = d[j] - d[max(i - 2, 0)]
+        t = t / (np.linalg.norm(t) + 1e-6)
+        n = np.array([-t[1], t[0]])
+        side = 1 if k % 2 == 0 else -1
+        px, pz = np.array([x, z]) + n * side * (w2 + 1.6)
+        ok = all(np.hypot(px - bx, pz - bz) > br for bx, bz, br in BUILT)
+        if ok:
+            place("street_lamp", px, pz, math.atan2(n[0] * side, n[1] * side))
+        k += 1
+
 FOOT = {"khata": 9, "khata_b": 8, "khata_tin": 9, "home_house": 10, "garage": 7, "shed": 4, "shop_village": 9, "church": 12, "bus_stop": 3,
         "well": 2, "gas_station": 13, "khrushchevka": 28, "parts_store": 12, "car_market": 26, "town_market": 16, "warehouse": 20,
         "monument": 5, "sawmill": 22, "lumber_camp": 18, "barn": 20, "grain_elevator": 13, "cowshed": 26, "flour_mill": 18, "bakery": 12,
@@ -357,12 +406,38 @@ for o in objs:
     fm[sub & (fm == 0)] = 4
 (field_map[:2048, :2048]).astype(np.uint8).tofile(os.path.join(OUT, "fields.bin"))
 
+# flatten terrain under buildings (and khata yards) so nothing floats; roads are protected
+PAD = {"khata": 13, "khata_b": 13, "khata_tin": 13}
+for o in objs:
+    rr = PAD.get(o["kind"], FOOT.get(o["kind"], 0))
+    if rr == 0:
+        continue
+    R = rr + 10
+    r0, c0 = int(round(o["z"] + HALF)), int(round(o["x"] + HALF))
+    r1, r2 = max(0, r0 - R), min(N, r0 + R + 1)
+    c1, c2 = max(0, c0 - R), min(N, c0 + R + 1)
+    yy, xx2 = np.mgrid[r1:r2, c1:c2]
+    dd = np.sqrt((yy - r0) ** 2 + (xx2 - c0) ** 2)
+    core = dd <= rr * 0.8
+    target = float(np.median(h[r1:r2, c1:c2][core]))
+    target = max(target, WATER + 1.5)
+    w = np.clip(1 - (dd - rr) / 10.0, 0, 1)
+    w = w * w * (3 - 2 * w)
+    protect = np.clip((dist[r1:r2, c1:c2] - hw[r1:r2, c1:c2] - 1.5) / 4.0, 0, 1)
+    w = w * protect
+    h[r1:r2, c1:c2] = h[r1:r2, c1:c2] * (1 - w) + target * w
+    o["y"] = round(target, 2)
+for o in objs:
+    if o["kind"] in ("fence_run", "power_pole", "street_lamp", "spawn_player", "wreck"):
+        o["y"] = round(H(o["x"], o["z"]), 2)
+h.astype("<f4").tofile(os.path.join(OUT, "height.bin"))
+
 # ---------------------------------------------------------------- vegetation
 # occupied mask
 occ = np.zeros((N, N), bool)
 for o in objs:
     r, c = int(o["z"] + HALF), int(o["x"] + HALF)
-    rad = 3 if o["kind"] in ("power_pole", "fence_run") else 22
+    rad = 3 if o["kind"] in ("power_pole", "fence_run", "street_lamp") else 22
     occ[max(0, r - rad):r + rad, max(0, c - rad):c + rad] = True
 for k, Lc in LOC.items():
     r, c = P(Lc["x"], Lc["z"])
@@ -370,6 +445,8 @@ for k, Lc in LOC.items():
     occ |= dd < Lc["r"] * 0.85
 occ |= dist < hw + 5
 occ |= river_d < 22
+occu_water = h < WATER + 0.9
+occ |= occu_water
 occ |= (field_map > 0) & (field_map != 4)
 forest_den = np.clip(forest_zone * 1.3 + fbm(3, 10, 1.0) * 1.2 - 0.05, 0, 1)
 # tree belts (lesosmuga) along fields & highway
@@ -451,7 +528,7 @@ mp[splat[..., 2] > 0.55] = [0.42, 0.32, 0.22]
 mp[splat[..., 1] > 0.5] = [0.82, 0.76, 0.62]
 mp[splat[..., 0] > 0.5] = [0.22, 0.22, 0.24]
 for o in objs:
-    if o["kind"] in ("power_pole", "fence_run"):
+    if o["kind"] in ("power_pole", "fence_run", "street_lamp"):
         continue
     r, c = int(o["z"] + HALF), int(o["x"] + HALF)
     mp[max(0, r - 5):r + 5, max(0, c - 5):c + 5] = [0.75, 0.3, 0.25]

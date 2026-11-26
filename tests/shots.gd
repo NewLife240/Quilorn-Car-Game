@@ -48,6 +48,25 @@ func _ready() -> void:
 		var c0: Vector3 = pos + dir * 12.0 + dir * 9.0 + Vector3.UP * 1.6
 		views = [["wheels", "cam", c0, pos + dir * 12.0 + Vector3.UP * 0.6]]
 		return
+	if OS.get_cmdline_user_args().has("fb"):
+		var kh: Dictionary = world.props.find_object("khata")
+		var kp := Vector3(kh.x, kh.y, kh.z)
+		var jk: Dictionary = world.props.find_object("junkyard_office")
+		var jp := Vector3(jk.x, jk.y, jk.z)
+		var gar: Dictionary = world.props.find_object("garage")
+		var gbb := Basis(Vector3.UP, gar.rot)
+		var gpp := Vector3(gar.x, gar.y, gar.z)
+		var fore := world.loc_pos("lumber")
+		views = [
+			["fb_yard", "cam", kp + Vector3(22, 9, 22), kp],
+			["fb_garage_bench", "cam", gpp + gbb * Vector3(-1.2, 1.9, -1.2), gpp + gbb * Vector3(-3.6, 1.0, -1.6)],
+			["fb_junk", "cam", jp + Vector3(6, 3, -9), jp + Vector3(-3, 0.3, -3)],
+			["fb_forest_far", "cam", fore + Vector3(420, 60, 420), fore],
+			["fb_sunrise", "time", 6.2, kp + Vector3(-30, 3, 0)],
+			["fb_night", "time", 22.5, kp + Vector3(10, 4, -25)],
+			["fb_map", "ui", 3, null],
+		]
+		return
 	if OS.get_cmdline_user_args().has("ui"):
 		views = [["ui_jobs", "ui", 0, null], ["ui_map", "ui", 3, null], ["ui_vehicle", "ui", 4, null], ["ui_shop", "shop", null, null], ["ui_garage", "player", null, null]]
 		return
@@ -118,6 +137,13 @@ func _process(dt: float) -> void:
 				cam.current = true
 			"carfp":
 				world.player.enter_vehicle(car)
+			"time":
+				Game.minutes = v[2] * 60.0
+				world._update_daylight()
+				cam.global_position = v[3]
+				var sd: Vector3 = -world.sun.global_basis.z
+				cam.look_at(v[3] - Vector3(sd.x, 0.0, sd.z).normalized() * 50.0 + Vector3.UP * 8.0)
+				cam.current = true
 			"ui":
 				world.hud.close_modal()
 				world.hud.close_tablet()

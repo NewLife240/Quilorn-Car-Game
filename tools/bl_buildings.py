@@ -22,7 +22,7 @@ COLORS = {
     "dome_blue": (0.15, 0.4, 0.75), "window_khata": (1, 1, 1), "window_plain": (1, 1, 1), "door_wood": (1, 1, 1), "gate_steel": (1, 1, 1),
     "gravel_pad": (0.5, 0.48, 0.45), "asphalt_pad": (0.3, 0.3, 0.3), "rubber": (0.05, 0.05, 0.05), "bark": (0.4, 0.3, 0.2), "bark_birch": (0.9, 0.9, 0.86),
     "leaves": (0.25, 0.45, 0.15), "leaves_dark": (0.15, 0.3, 0.12), "leaves_light": (0.4, 0.55, 0.2), "needles": (0.12, 0.25, 0.12), "leaves_willow": (0.4, 0.55, 0.3),
-    "leaves_apple": (0.3, 0.5, 0.2), "apples": (0.75, 0.15, 0.1), "lamp": (1, 0.95, 0.8), "hay": (0.85, 0.75, 0.45), "dirt_pile": (0.45, 0.38, 0.3),
+    "leaves_apple": (0.3, 0.5, 0.2), "apples": (0.75, 0.15, 0.1), "lamp": (1, 0.95, 0.8), "black_box": (0.05, 0.05, 0.05), "hay": (0.85, 0.75, 0.45), "dirt_pile": (0.45, 0.38, 0.3),
 }
 SIGNS = ["shop", "gas", "parts", "market", "carmarket", "sawmill", "bakery", "warehouse", "mill", "oil", "furniture", "quarry", "busstop", "lumber", "farm", "junk", "garage", "village"]
 
@@ -91,14 +91,38 @@ class B:
             v.co = M @ v.co + Vector(c)
         fs = list({f for v in vs for f in v.link_faces})
         idx = self.mi(m)
+        self.bm.normal_update()
+        ax = Vector((0, 0, 1)) if axis == 'Z' else (Vector((0, 1, 0)) if axis == 'Y' else Vector((1, 0, 0)))
         for f in fs:
             f.material_index = idx
-            f.smooth = True
-        self.bm.normal_update()
+            f.smooth = abs(f.normal.dot(ax)) < 0.5
         self._uv_box(fs)
         if col:
             self.cols.append((c, (r * 1.6, r * 1.6, h), 0.0))
         return fs
+
+    def tyre(self, c, R=0.36, r=0.13, axis='Z'):
+        res = bmesh.ops.create_cone(self.bm, cap_ends=False, segments=16, radius1=R, radius2=R, depth=2 * r)
+        fs = list({f for v in res["verts"] for f in v.link_faces})
+        # inner + side rings: a simple chunky tyre (outer tread + sidewalls)
+        M = Matrix.Identity(4) if axis == 'Z' else Matrix.Rotation(math.pi / 2, 4, 'Y')
+        for v in res["verts"]:
+            v.co = M @ v.co + Vector(c)
+        res2 = bmesh.ops.create_circle(self.bm, cap_ends=False, segments=16, radius=R)
+        idx = self.mi("rubber")
+        for f in fs:
+            f.material_index = idx
+            f.smooth = True
+        for z in (-r, r):
+            ring_o = [self.bm.verts.new(M @ Vector((math.cos(a) * R, math.sin(a) * R, z)) + Vector(c)) for a in [2 * math.pi * k / 16 for k in range(16)]]
+            ring_i = [self.bm.verts.new(M @ Vector((math.cos(a) * R * 0.55, math.sin(a) * R * 0.55, z)) + Vector(c)) for a in [2 * math.pi * k / 16 for k in range(16)]]
+            for k in range(16):
+                q = [ring_o[k], ring_o[(k + 1) % 16], ring_i[(k + 1) % 16], ring_i[k]]
+                f = self.bm.faces.new(q if z > 0 else q[::-1])
+                f.material_index = idx
+        for v in res2["verts"]:
+            self.bm.verts.remove(v)
+        self.bm.normal_update()
 
     def quad(self, m, p0, p1, p2, p3, uv=((0, 0), (1, 0), (1, 1), (0, 1))):
         vs = [self.bm.verts.new(p) for p in (p0, p1, p2, p3)]
@@ -183,6 +207,10 @@ class B:
                 fs.append(f)
             except ValueError:
                 pass
+        self.bm.normal_update()
+        for f in fs:
+            if f.normal.z < 0:
+                f.normal_flip()
         # underside (soffit)
         f = self.bm.faces.new([vs[3], vs[2], vs[1], vs[0]])
         f.material_index = self.mi("wood_dark")
@@ -266,18 +294,22 @@ class B:
 # ======================================================================= buildings
 def khata(name, wall="plaster_white", roof="slate", sx=9.0, sy=6.0, hw=2.7, porch=False, bed=False):
     b = B()
-    b.box("plaster_blue", (0, 0, 0.2), (sx + 0.15, sy + 0.15, 0.6))       # plinth (pryzba)
+    b.box("plaster_blue", (0, 0, -0.8), (sx + 0.15, sy + 0.15, 2.6))       # plinth (pryzba) going into the ground
     b.box(wall, (0, 0, hw / 2 + 0.2), (sx, sy, hw), col=True)
     b.hip(roof, (0, 0, hw + 0.2), sx, sy, 2.4)
     b.box("bricks", (sx * 0.22, -sy * 0.1, hw + 2.0), (0.6, 0.6, 2.4))     # chimney
-    for x in (-sx * 0.3, sx * 0.05):
-        b.window((x, sy / 2 + 0.01, 1.7), 1.5, 1.5, "+y", "window_khata")
-    for y in (-sy * 0.2,):
-        b.window((sx / 2 + 0.01, y, 1.7), 1.5, 1.5, "+x", "window_khata")
-        b.window((-sx / 2 - 0.01, y, 1.7), 1.5, 1.5, "-x", "window_khata")
+    win = "window_khata"
+    for x in (-sx * 0.3, sx * 0.02):
+        b.window((x, sy / 2 + 0.01, 1.7), 1.5, 1.5, "+y", win)
+    for x in (-sx * 0.25, sx * 0.25):
+        b.window((x, -sy / 2 - 0.01, 1.7), 1.4, 1.4, "-y", win)
+    for y in (-sy * 0.22, sy * 0.22):
+        b.window((sx / 2 + 0.01, y, 1.7), 1.4, 1.4, "+x", win)
+        b.window((-sx / 2 - 0.01, y, 1.7), 1.4, 1.4, "-x", win)
     b.wall_quad("door_wood", sx * 0.33, sy / 2 + 0.01, 1.25, 1.0, 2.1, "+y")
+    b.wall_quad("door_wood", -sx * 0.05, -sy / 2 - 0.01, 1.25, 0.9, 2.0, "-y")
     # porch with steps and small roof
-    b.box("concrete", (sx * 0.33, sy / 2 + 0.6, 0.12), (1.8, 1.2, 0.3))
+    b.box("concrete", (sx * 0.33, sy / 2 + 0.6, 0.0), (1.8, 1.2, 0.55))
     b.gable(roof, (sx * 0.33, sy / 2 + 0.7, 2.45), 1.6, 1.2, 0.5, over=0.15, along='y')
     for dx in (-0.8, 0.8):
         b.box("wood", (sx * 0.33 + dx, sy / 2 + 1.2, 1.25), (0.1, 0.1, 2.4))
@@ -321,18 +353,15 @@ def garage():
     b.box("wood_dark", (-W / 2 + wt + 0.02, 1.6, 1.6), (0.03, 2.2, 1.2))   # pegboard
     for i in range(6):
         b.box("metal", (-W / 2 + wt + 0.06, 0.8 + i * 0.32, 1.5 + (i % 2) * 0.25), (0.04, 0.03, 0.25))
-    # shelves on the right wall with tyres
-    for z in (0.5, 1.3, 2.1):
-        b.box("metal", (W / 2 - 0.55, -1.5, z), (0.8, 3.0, 0.05))
-    for y in (-2.7, -0.3):
-        for x in (W / 2 - 0.95, W / 2 - 0.15):
-            b.box("metal", (x, y, 1.15), (0.05, 0.05, 2.3))
-    for i in range(4):
-        b.cyl("rubber", (W / 2 - 0.55, -2.6 + i * 0.7, 1.62), 0.32, 0.2, 14, axis='X')
-    # barrel, lamp
-    b.cyl("metal_blue", (W / 2 - 0.6, 2.8, 0.55), 0.3, 0.9, 14, col=True)
+    # one small shelf on the right wall, lamp
+    b.box("metal", (W / 2 - 0.45, -2.2, 1.4), (0.6, 2.0, 0.05))
+    for y in (-3.1, -1.3):
+        b.box("metal", (W / 2 - 0.45, y, 0.7), (0.05, 0.05, 1.4))
     b.box("lamp", (0, 0, H - 0.08), (1.2, 0.12, 0.06))
-    b.ip("workbench", (bx, 1.6, 1.0))
+    # battery charger at the back end of the bench
+    b.box("metal_red", (bx, 0.72, 1.08), (0.32, 0.25, 0.26))
+    b.box("black_box", (bx + 0.17, 0.72, 1.12), (0.02, 0.16, 0.08))
+    b.ip("charger", (bx, 0.72, 1.1))
     b.ip("light", (0, 0, H - 0.3))
     b.export("garage")
 
@@ -366,6 +395,7 @@ def fence_run():
 
 def shop_village():
     b = B()
+    b.box("concrete", (0, 0, -0.9), (10.2, 7.2, 2.0))
     b.box("plaster_yellow", (0, 0, 1.7), (10, 7, 3.4), col=True)
     b.box("slate", (0, 0, 3.5), (10.6, 7.6, 0.25))
     b.sign("shop", (0, 3.52, 2.9), 4.0, 0.75)
@@ -380,6 +410,7 @@ def shop_village():
 
 def church():
     b = B()
+    b.box("concrete", (0, 0, -1.0), (8.4, 20, 2.0))
     b.box("plaster_white", (0, -2, 4), (8, 14, 8), col=True)
     b.gable("tin_green", (0, -2, 8), 8, 14, 3.0, 0.4, 'y', "plaster_white")
     b.box("plaster_white", (0, 6.5, 6), (5, 5, 12), col=True)
@@ -472,6 +503,7 @@ def khrushchevka():
 
 def parts_store():
     b = B()
+    b.box("concrete", (0, 0, -0.9), (14.2, 10.2, 2.0))
     b.box("bricks", (0, 0, 2.25), (14, 10, 4.5), col=True)
     b.box("tin", (0, 0, 4.6), (14.6, 10.6, 0.25))
     b.sign("parts", (0, 5.02, 3.8), 6.0, 1.1)
@@ -584,6 +616,7 @@ def plank_stack(b, c):
 
 
 def office(b, c, sign=None, ip="office", w=6.0, d=4.0):
+    b.box("concrete", (c[0], c[1], -0.9), (w + 0.2, d + 0.2, 2.0))
     b.box("plaster_white", (c[0], c[1], 1.4), (w, d, 2.8), col=True)
     b.box("slate", (c[0], c[1], 2.9), (w + 0.5, d + 0.5, 0.2))
     b.window((c[0] - 1.2, c[1] + d / 2 + 0.01, 1.5), 1.4, 1.2, "+y")
@@ -741,8 +774,8 @@ def junkyard_office():
     for i in range(10):
         a = i * 0.63
         b.box("rust", (math.cos(a) * 26, math.sin(a) * 26, 1.0), (5.0, 0.15, 2.0), rot=a + math.pi / 2, col=True)
-    for i in range(8):
-        b.cyl("rubber", (-4 + (i % 4) * 0.8, -3 - (i // 4) * 0.4, 0.15 + (i // 4) * 0.3), 0.35, 0.22, 12)
+    for i in range(6):
+        b.tyre((-4 + (i % 3) * 0.85, -3.2, 0.13 + (i // 3) * 0.27))
     b.ip("junk", (1.8, 2.0, 1.0))
     b.ip("sell", (0, 9, 0.5))
     b.export("junkyard_office")
@@ -755,6 +788,16 @@ def power_pole():
     for x in (-0.85, 0.0, 0.85):
         b.cyl("metal_white", (x, 0, 8.6), 0.05, 0.22, 6)
     b.export("power_pole")
+
+
+def street_lamp():
+    b = B()
+    b.cyl("concrete", (0, 0, 3.6), 0.11, 7.2, 8, col=True, r2=0.08)
+    b.box("metal", (0, 0.8, 7.1), (0.08, 1.7, 0.08))
+    b.box("metal", (0, 1.6, 6.98), (0.28, 0.5, 0.14))
+    b.box("lamp", (0, 1.6, 6.9), (0.22, 0.4, 0.03))
+    b.ip("streetlight", (0, 1.6, 6.7))
+    b.export("street_lamp")
 
 
 def wreck():
@@ -873,6 +916,53 @@ def tree(name):
     b.export(name, OUTN)
 
 
+
+
+def tree_lod(name):
+    # ~20-40 triangle stand-in for distant trees
+    b = B()
+    def lowblob(m, c, r, sq=1.0):
+        res = bmesh.ops.create_icosphere(b.bm, subdivisions=0, radius=r)
+        for v in res["verts"]:
+            v.co = Vector((v.co.x, v.co.y, v.co.z * sq)) + Vector(c)
+        for f in {f for v in res["verts"] for f in v.link_faces}:
+            f.material_index = b.mi(m)
+    def lowtrunk(m, h, r):
+        res = bmesh.ops.create_cone(b.bm, cap_ends=False, segments=4, radius1=r, radius2=r * 0.5, depth=h)
+        for v in res["verts"]:
+            v.co += Vector((0, 0, h / 2 - 0.3))
+        for f in {f for v in res["verts"] for f in v.link_faces}:
+            f.material_index = b.mi(m)
+    if name == "pine":
+        lowtrunk("bark", 5, 0.25)
+        res = bmesh.ops.create_cone(b.bm, cap_ends=True, segments=6, radius1=2.7, radius2=0.1, depth=9.5)
+        for v in res["verts"]:
+            v.co += Vector((0, 0, 4.0 + 4.75))
+        for f in {f for v in res["verts"] for f in v.link_faces}:
+            f.material_index = b.mi("needles")
+    elif name == "birch":
+        lowtrunk("bark_birch", 7, 0.18)
+        lowblob("leaves_light", (0.2, 0, 7.8), 2.6, 1.4)
+    elif name == "oak":
+        lowtrunk("bark", 5, 0.45)
+        lowblob("leaves", (0, 0, 7.2), 4.0, 0.75)
+    elif name == "poplar":
+        lowtrunk("bark", 5, 0.3)
+        lowblob("leaves", (0, 0, 9.5), 2.0, 3.2)
+    elif name == "willow":
+        lowtrunk("bark", 4, 0.45)
+        lowblob("leaves_willow", (0, 0, 5.2), 3.6, 0.85)
+    elif name == "acacia":
+        lowtrunk("bark", 5, 0.3)
+        lowblob("leaves", (0.4, 0, 6.6), 3.0, 0.6)
+    elif name == "apple":
+        lowtrunk("bark", 2, 0.15)
+        lowblob("leaves_apple", (0, 0, 2.9), 1.9, 0.75)
+    b.bm.normal_update()
+    b._uv_box(list(b.bm.faces), 0.5)
+    b.export(name + "_lod", OUTN)
+
+
 ALL = {
     "khata": lambda: khata("khata"), "khata_b": lambda: khata("khata_b", "plaster_yellow", "tin_green", 8.0, 6.0, 2.6),
     "khata_tin": lambda: khata("khata_tin", "plaster_blue", "tin", 9.5, 6.5, 2.7),
@@ -882,10 +972,11 @@ ALL = {
     "town_market": town_market, "warehouse": warehouse, "monument": monument, "sawmill": sawmill, "lumber_camp": lumber_camp,
     "barn": barn, "grain_elevator": grain_elevator, "cowshed": cowshed, "flour_mill": flour_mill, "bakery": bakery,
     "oil_press": oil_press, "quarry_office": quarry_office, "furniture_factory": furniture_factory, "junkyard_office": junkyard_office,
-    "power_pole": power_pole, "wreck": wreck,
+    "power_pole": power_pole, "wreck": wreck, "street_lamp": street_lamp,
 }
 for t in ["pine", "birch", "oak", "poplar", "willow", "acacia", "apple"]:
     ALL["tree_" + t] = (lambda t=t: tree(t))
+    ALL["treelod_" + t] = (lambda t=t: tree_lod(t))
 
 ids = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 for k, f in ALL.items():

@@ -24,6 +24,7 @@ var pause_menu: Control
 var _tabs: TabContainer
 var _map_tex: Texture2D
 var _check_t := 0.0
+var underwater: ColorRect
 
 
 func _ready() -> void:
@@ -34,6 +35,12 @@ func _ready() -> void:
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.theme = UIKit.theme()
 	add_child(root)
+	underwater = ColorRect.new()
+	underwater.color = Color(0.05, 0.22, 0.28, 0.72)
+	underwater.set_anchors_preset(Control.PRESET_FULL_RECT)
+	underwater.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	underwater.visible = false
+	root.add_child(underwater)
 	_build_hud()
 	Game.notified.connect(_on_notify)
 	Game.money_changed.connect(func(_m): _update_money())
@@ -137,6 +144,8 @@ func _process(dt: float) -> void:
 	var p: Player = Game.player
 	if p == null:
 		return
+	var cam3 := get_viewport().get_camera_3d()
+	underwater.visible = cam3 != null and Game.world != null and cam3.global_position.y < Game.world.terrain.water_level - 0.05
 	var v: Vehicle = p.vehicle
 	var ui := modal != null or tablet != null or pause_menu != null
 	cross.visible = v == null and not ui
