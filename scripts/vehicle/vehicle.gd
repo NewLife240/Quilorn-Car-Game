@@ -29,6 +29,7 @@ var wheels: Array[Dictionary] = []
 # --- driver state
 var driver: Node = null
 var hood_open := false
+var _shell_mats: Array[BaseMaterial3D] = []
 var _hood_angle := 0.0
 var camera_mode := 0           # 0 first person, 1 third person
 var fp_cam: Camera3D
@@ -154,14 +155,18 @@ func _build_model() -> void:
 		var n := model.find_child("needle_" + k, true, false)
 		if n:
 			needles[k] = n
-	# materials: body back-face culled so the interior can be seen out of
+	# materials: everything double-sided (the source models are open single-sided shells:
+	# hood underside, engine bay and wheel arches would be see-through otherwise). Only the
+	# body shell switches to back-face culling while sitting inside, so you can see out of it.
 	for mi in model.find_children("*", "MeshInstance3D", true, false):
 		var m := mi as MeshInstance3D
 		for s in range(m.mesh.get_surface_count()):
 			var mat := m.mesh.surface_get_material(s)
 			if mat is BaseMaterial3D:
 				var nm: BaseMaterial3D = mat.duplicate()
-				nm.cull_mode = BaseMaterial3D.CULL_BACK
+				nm.cull_mode = BaseMaterial3D.CULL_DISABLED
+				if m.name.begins_with("body"):
+					_shell_mats.append(nm)
 				if m.name.begins_with("body") or m.name == "hood":
 					nm.roughness = 0.42
 					nm.metallic_specular = 0.6
@@ -572,6 +577,7 @@ func exit_vehicle() -> Vector3:
 	in_handbrake = 1.0 if speed_kmh < 3.0 else 0.0
 	fp_cam.current = false
 	tp_cam.current = false
+	_set_shell_cull(false)
 	if interior:
 		interior.visible = false
 		steer_node.visible = false
@@ -597,8 +603,14 @@ func exit_vehicle() -> Vector3:
 	return global_transform * Vector3(0, meta.height + 0.5, 0)
 
 
+func _set_shell_cull(inside: bool) -> void:
+	for m in _shell_mats:
+		m.cull_mode = BaseMaterial3D.CULL_BACK if inside else BaseMaterial3D.CULL_DISABLED
+
+
 func _set_camera() -> void:
 	var fp := camera_mode == 0
+	_set_shell_cull(fp)
 	fp_cam.current = fp
 	tp_cam.current = not fp
 	fp_cam.fov = Game.settings.fov
@@ -862,20 +874,20 @@ func _physics_process(dt: float) -> void:
 			clutch = move_toward(clutch, target, dt * 4.0)
 		else:
 			clutch = move_toward(clutch, 1.0, dt * 5.0)
-		clutch *= clampf(slot_q("gearbox") * 1.3, 0.3, 1.0)
 	if auto_gearbox and gear >= 2 and shift_timer <= 0.0 and running:
 		var peak: float = e.get("rpm_peak", red * 0.6)
 		var up_rpm := lerpf(peak * 0.95, maxf(peak * 1.2, red * 0.78), in_throttle)
 		var drv_slip := 0.0
 		for w in driven:
 			drv_slip = maxf(drv_slip, absf(w.omega * w.radius - w.get("vlong", 0.0)))
-		if engine_rpm > up_rpm and gear < ratios.size() - 1 and clutch > 0.9 and drv_slip < 2.5 and speed_kmh > (gear - 1) * 9.0:
+		if engine_rpm > up_rpm and gear < ratios.size() - 1 and clutch > 0.9 and (drv_slip < 2.5 or engine_rpm > red * 0.97) and speed_kmh > (gear - 1) * 7.0:
 			_shift(gear + 1)
 		elif engine_rpm < idle * 1.35 and gear > 2:
 			_shift(gear - 1)
 		elif in_throttle > 0.85 and gear > 2 and engine_rpm < red * 0.45:
+			# kickdown only when the lower gear lands well below the upshift point (no gear hunting)
 			var nr: float = ratios[gear - 1] * float(gears.final) * (float(gears.low) if low_range else 1.0)
-			if absf(wheel_avg * nr) * 60.0 / TAU < red * 0.8:
+			if absf(wheel_avg * nr) * 60.0 / TAU < maxf(peak * 1.2, red * 0.78) * 0.85:
 				_shift(gear - 1)
 	# ---------- suspension & contact
 	var space := get_world_3d().direct_space_state
@@ -1053,7 +1065,8 @@ func _physics_process(dt: float) -> void:
 			n_drv += 1
 			i_wheel_sum += iw[i]
 	var i_s := i_wheel_sum / maxf(ratio * ratio, 0.0001)
-	var cap := tmax * 1.8 * clutch
+	# a worn gearbox/clutch slips under full load instead of never engaging
+	var cap := tmax * 1.8 * clutch * lerpf(0.7, 1.0, clampf(slot_q("gearbox"), 0.0, 1.0))
 	var base_t := _torque_curve(engine_rpm, e) * throttle_eff * power_mult * (1.0 - misfire * 0.7) if running else 0.0
 	for _s in range(SUBSTEPS):
 		var avg := 0.0
@@ -1083,8 +1096,9 @@ func _physics_process(dt: float) -> void:
 			if gr[i]:
 				var slip := om[i] * r - vl[i]
 				var kappa := slip / maxf(absf(vl[i]), 3.0)
-				var bx := 10.0 * kappa
-				fx = sin(1.65 * atan(bx - 0.1 * (bx - atan(bx)))) * muz[i]
+				var bx := 12.0 * kappa
+				# C=1.45: a spinning tyre keeps ~80% of its peak grip (real tyres), not ~55%
+				fx = sin(1.45 * atan(bx - 0.1 * (bx - atan(bx)))) * muz[i]
 				# stability: the tyre can't push harder than what cancels the slip within this substep
 				var lim := absf(slip) * iw[i] / (r * r * dts)
 				fx = clampf(fx, -lim, lim)
@@ -1098,15 +1112,17 @@ func _physics_process(dt: float) -> void:
 					w_new -= signf(w_new) * dw
 			om[i] = w_new
 			fxs[i] += fx / SUBSTEPS
-		if diff_lock and n_drv > 1:
+		if n_drv > 1:
 			var a2 := 0.0
 			for i in range(n_w):
 				if isd[i]:
 					a2 += om[i]
 			a2 /= n_drv
+			# locked: wheels turn together; open: a little internal friction (real diffs aren't ideal)
+			var k := 0.8 if diff_lock else 0.02
 			for i in range(n_w):
 				if isd[i]:
-					om[i] = lerpf(om[i], a2, 0.8)
+					om[i] = lerpf(om[i], a2, k)
 	for i in range(n_w):
 		wheels[i].omega = om[i]
 		wheels[i].fx = fxs[i]

@@ -369,10 +369,24 @@ def process(vid, cfg):
         bay_z1 = hmx.z + 0.15
         bay_x = 0.40 * W
     bay_z0 = max(0.22, wr * 0.75)
+    # keep the bay walls inside the front wheels so the tyres don't poke into it
+    front = [w for w in wheels if w["c"].y > fa - 0.3]
+    inner = min(abs(w["c"].x) - w["w"] / 2 for w in front) - 0.04
+    bay_x = max(0.28 * W, min(bay_x, inner))
     set_origin(hood, hinge)
     # ---- engine bay box (inward, open top for hood)
     bmb = bmesh.new()
     add_box(bmb, ((0), (bay_y0 + bay_y1) / 2, (bay_z0 + bay_z1) / 2), (2 * bay_x, bay_y1 - bay_y0, bay_z1 - bay_z0), inward=True, skip_top=(hood_kind == "hood"))
+    if hood_kind == "hood":
+        # fender shelves: close the gap between the bay walls and the body sides
+        for sx in (-1, 1):
+            x0, x1 = bay_x, min(0.5 * W - 0.06, (hmx.x - hmn.x) / 2 + 0.05)
+            if x1 > x0 + 0.02:
+                vs = [bmb.verts.new((sx * x, y, bay_z1 - 0.01)) for x, y in ((x0, bay_y0), (x1, bay_y0), (x1, bay_y1), (x0, bay_y1))]
+                f = bmb.faces.new(vs)
+                f.normal_update()
+                if f.normal.z < 0:
+                    f.normal_flip()
     if hood_kind == "hatch":
         # open the front face for the hatch
         fr = [f for f in bmb.faces if f.normal.y < -0.9]

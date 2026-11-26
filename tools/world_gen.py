@@ -127,12 +127,29 @@ def densify(pts, step=1.0):
     return np.array(out)
 
 
+# real roads don't climb straight up hills: cut/fill the profile to a maximum grade
+MAX_GRADE = {"asphalt": 0.075, "gravel": 0.10, "dirt": 0.14}
+
+
+def limit_grade(ys, ds, g):
+    # average of forward- and backward-clamped profiles: both are g-Lipschitz, so is the mean
+    f = ys.copy()
+    b = ys.copy()
+    for i in range(1, len(f)):
+        f[i] = min(max(f[i], f[i - 1] - g * ds), f[i - 1] + g * ds)
+    for i in range(len(b) - 2, -1, -1):
+        b[i] = min(max(b[i], b[i + 1] - g * ds), b[i + 1] + g * ds)
+    # round the vertical curves (smoothing keeps the grade limit)
+    return ndimage.gaussian_filter1d((f + b) / 2, 12, mode='nearest')
+
+
 road_center = np.zeros((N, N), bool)
 road_height = np.zeros((N, N), np.float32)
 road_halfw = np.zeros((N, N), np.float32)
 road_kind = np.zeros((N, N), np.uint8)
 KIND_ID = {"asphalt": 1, "gravel": 2, "dirt": 3}
 hs = ndimage.gaussian_filter(h, 6)
+done_pts, done_ys = [], []
 for rd in ROADS:
     d = densify(rd["pts"], 0.5)
     rd["dense"] = d
@@ -141,6 +158,22 @@ for rd in ROADS:
     ys = ndimage.map_coordinates(hs, [rr, cc], order=1)
     ys = np.maximum(ys, WATER + 2.2)  # embankment over the river
     ys = ndimage.gaussian_filter1d(ys, 40 if rd["kind"] == "asphalt" else 18, mode='nearest')
+    ys = limit_grade(ys, 0.5, MAX_GRADE[rd["kind"]])
+    # junctions: pin to the height of roads already laid so there is no step where they meet
+    if done_pts:
+        from scipy.spatial import cKDTree
+        tree = cKDTree(np.concatenate(done_pts))
+        allys = np.concatenate(done_ys)
+        dd, ii = tree.query(d, distance_upper_bound=rd["w"] / 2 + 5.0)
+        pin = np.isfinite(dd)
+        if pin.any():
+            for _ in range(6):
+                ys[pin] = allys[ii[pin]]
+                ys = limit_grade(ys, 0.5, MAX_GRADE[rd["kind"]])
+            ys[pin] = allys[ii[pin]]
+            ys = ndimage.gaussian_filter1d(ys, 3, mode='nearest')
+    done_pts.append(d)
+    done_ys.append(ys)
     rd["ys"] = ys
     for (x, z), y in zip(d, ys):
         r, c = int(round(z + HALF)), int(round(x + HALF))
@@ -157,6 +190,10 @@ rk = road_kind[ir, ic]
 blend = np.clip(1 - (dist - hw) / 9.0, 0, 1)
 blend = blend * blend * (3 - 2 * blend)
 h = h * (1 - blend) + rh * blend
+# nearest-centre-pixel heights terrace the road on climbs (~grade x 1 m steps): smooth the corridor
+corr = np.clip(1 - (dist - hw - 2.0) / 4.0, 0, 1)
+for _ in range(2):
+    h = h * (1 - corr) + ndimage.gaussian_filter(h, 1.6) * corr
 # slight crown / ditch for dirt & gravel
 ditch = np.clip(1 - np.abs(dist - hw - 1.6) / 1.2, 0, 1) * (rk >= 2)
 h -= ditch * 0.35

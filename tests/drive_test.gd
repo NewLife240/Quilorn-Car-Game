@@ -10,12 +10,16 @@ var where := "road"
 var shots := false
 var road_pts: Array = []
 var road_i := 0
+var cond := 100.0
+var start_i := -1
 
 func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("vid="): vid = a.substr(4)
 		if a.begins_with("where="): where = a.substr(6)
 		if a == "shots": shots = true
+		if a.begins_with("cond="): cond = float(a.substr(5))
+		if a.begins_with("i="): start_i = int(a.substr(2))
 	Game.new_game = true
 	world = load("res://scenes/game.tscn").instantiate()
 	add_child(world)
@@ -26,14 +30,33 @@ func _ready() -> void:
 	var q: Array = pts[64]
 	if where == "mud":
 		pts = world.data.roads[8].pts
-		p = pts[40]
-		q = pts[44]
+		var si := 40 if start_i < 0 else start_i
+		p = pts[si]
+		q = pts[si + 4]
+	road_i = 60 if where == "road" else (40 if start_i < 0 else start_i)
+	if where == "hill":
+		# steepest stretch of road anywhere on the map, start 40 m before it
+		var best := 0.0
+		for r in world.data.roads:
+			if r.kind == "dirt": continue
+			var rp: Array = r.pts
+			for i in range(8, rp.size() - 10):
+				var a2: Array = rp[i]
+				var b2: Array = rp[i + 6]
+				var hd := world.terrain.height_at(b2[0], b2[2]) - world.terrain.height_at(a2[0], a2[2])
+				var dd := Vector2(b2[0] - a2[0], b2[2] - a2[2]).length()
+				if dd > 1.0 and hd / dd > best:
+					best = hd / dd
+					pts = rp
+					road_i = i - 6
+		p = pts[road_i]
+		q = pts[road_i + 2]
+		print("HILL grade %.1f%%" % (best * 100.0))
 	road_pts = pts
-	road_i = 60 if where == "road" else 40
 	var pos := Vector3(p[0], world.terrain.height_at(p[0], p[2]) + 1.0, p[2])
 	var dir := (Vector3(q[0], 0, q[2]) - Vector3(p[0], 0, p[2])).normalized()
 	v = world.spawn_vehicle(vid, Transform3D(Basis.looking_at(dir, Vector3.UP), pos))
-	v.install_default_parts(100, 100)
+	v.install_default_parts(cond, cond)
 	v.fuel = 30
 	v.oil = 4
 	v.coolant = 6

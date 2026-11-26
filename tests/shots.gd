@@ -48,6 +48,38 @@ func _ready() -> void:
 		var c0: Vector3 = pos + dir * 12.0 + dir * 9.0 + Vector3.UP * 1.6
 		views = [["wheels", "cam", c0, pos + dir * 12.0 + Vector3.UP * 0.6]]
 		return
+	if OS.get_cmdline_user_args().has("hill"):
+		var hv := []
+		for spot in [[6, Vector2(-207, 193)], [0, Vector2(-373, 296)], [3, Vector2(-180, 262)]]:
+			var rp: Array = world.data.roads[spot[0]].pts
+			var bi := 0
+			var bd2 := 1e9
+			for i in range(rp.size()):
+				var d2 := Vector2(rp[i][0], rp[i][2]).distance_to(spot[1])
+				if d2 < bd2:
+					bd2 = d2
+					bi = i
+			var a3: Array = rp[clampi(bi - 3, 0, rp.size() - 1)]
+			var b3: Array = rp[clampi(bi + 6, 0, rp.size() - 1)]
+			var ca := Vector3(a3[0], world.terrain.height_at(a3[0], a3[2]) + 2.2, a3[2])
+			var cb := Vector3(b3[0], world.terrain.height_at(b3[0], b3[2]) + 1.0, b3[2])
+			hv.append(["hill_%d" % spot[0], "cam", ca, cb])
+		views = hv
+		settle = 30
+		return
+	if OS.get_cmdline_user_args().has("hood"):
+		var kc: Vehicle = null
+		for vv in world.vehicles:
+			if vv.vid == "kombi": kc = vv
+		kc.hood_open = true
+		var kx := kc.global_transform
+		settle = 40
+		views = [
+			["hood_front", "cam", kx * Vector3(0, 2.3, -3.4), kx * Vector3(0, 0.55, -1.3)],
+			["hood_side", "cam", kx * Vector3(1.6, 1.9, -2.6), kx * Vector3(0, 0.6, -1.4)],
+			["hood_under", "cam", kx * Vector3(0.2, 1.0, -2.6), kx * Vector3(0, 1.9, -1.2)],
+		]
+		return
 	if OS.get_cmdline_user_args().has("fb2"):
 		var kr: Dictionary = world.props.find_object("khrushchevka")
 		var kb := Basis(Vector3.UP, kr.rot)
