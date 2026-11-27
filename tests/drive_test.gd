@@ -1,5 +1,14 @@
 extends Node
 ## Automated driving test: run with  godot --headless --path . res://tests/drive_test.tscn -- vid=kombi
+## Pass/fail expectations (any subset; exit code 1 if one fails, see tests/run_tests.sh):
+##   min_gear=N        highest forward gear reached while cruising (catches a gearbox that never upshifts)
+##   min_kmh=X         top speed reached while cruising
+##   min_climb_kmh=X   lowest speed after the first 12 s of cruising (catches losing power on a climb)
+##   min_pwr=X         engine power factor at the end (catches stacked wear penalties)
+##   max_temp=X        hottest coolant temperature during the run
+##   stop_s=X          braking from cruise to standstill must take at most X seconds
+## Always checked: the engine starts and never stalls, and the car comes to a stop.
+const Check = preload("res://tests/check.gd")
 var world: World
 var v: Vehicle
 var t := 0.0
@@ -19,6 +28,9 @@ var shot_dir := ""
 var shot_at: Array = []
 var tp := false
 var v_warm := false
+var expect := {}
+var c: Check
+var stats := {"max_gear": 0, "max_kmh": 0.0, "min_climb_kmh": 1e9, "max_temp": 0.0, "stalled": false, "started": false, "stop_s": -1.0}
 
 func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
@@ -35,6 +47,9 @@ func _ready() -> void:
 			for x in a.substr(8).split(","): shot_at.append(float(x))
 		if a == "tp": tp = true
 		if a == "warm": v_warm = true
+		for k in ["min_gear", "min_kmh", "min_climb_kmh", "min_pwr", "max_temp", "stop_s"]:
+			if a.begins_with(k + "="): expect[k] = float(a.substr(k.length() + 1))
+	c = Check.new("drive %s" % " ".join(OS.get_cmdline_user_args()), get_tree(), 60.0 + maxf(dur, 25.0) * 3.0)
 	Game.new_game = true
 	world = load("res://scenes/game.tscn").instantiate()
 	add_child(world)
@@ -84,6 +99,7 @@ func _ready() -> void:
 	else:
 		v.fuel = 30
 	world.player.enter_vehicle(v)
+	v.auto_gearbox = true   # tests drive with the automatic gearbox, whatever the local settings say
 	if v_warm:
 		v.temp = 85.0  # skip the warm-up so short runs show the steady-state temperature
 	if tp:
@@ -92,8 +108,9 @@ func _ready() -> void:
 	print("SPAWN ", vid, " at ", pos, " mass ", v.mass, " surface ", world.terrain.surface(pos.x, pos.z))
 
 func _physics_process(dt: float) -> void:
-	if v == null: return
+	if v == null or c.done: return
 	t += dt
+	_collect_stats()
 	match phase:
 		0:
 			if t > 1.0:
@@ -101,6 +118,7 @@ func _physics_process(dt: float) -> void:
 		1:
 			if v.running or t > 4.0:
 				Input.action_release("ignition"); print("STARTED=", v.running, " after ", t, "s rpm ", v.engine_rpm); phase = 2; t = 0
+				stats.started = v.running
 		2:
 			if t > 1.0: Input.action_press("forward"); phase = 3; t = 0
 		3:
@@ -117,13 +135,15 @@ func _physics_process(dt: float) -> void:
 					Input.action_release("back"); Input.action_press("forward"); phase = 6; t = 0
 		4:
 			if v.speed_kmh < 1.0 or t > 12.0:
-				print("STOPPED in ", t, "s"); Input.action_release("back"); phase = 5; t = 0
+				print("STOPPED in ", t, "s"); Input.action_release("back"); phase = 5
+				stats.stop_s = t if v.speed_kmh < 1.0 else -1.0
+				t = 0
 		5:
 			if t > 2.0:
-				print("DONE"); get_tree().quit()
+				print("DONE"); _evaluate()
 		6:
 			if t > 15.0:
-				print("DONE"); get_tree().quit()
+				print("DONE"); _evaluate()
 	# screenshots at given drive times (phase 3), e.g. shot=/tmp/out shot_at=10,30 (needs a display, not --headless)
 	if shot_dir != "" and phase == 3 and not shot_at.is_empty() and t >= shot_at[0]:
 		shot_at.pop_front()
@@ -153,3 +173,29 @@ func _physics_process(dt: float) -> void:
 		print("PERF process=%.2fms physics=%.2fms objects=%d nodes=%d" % [Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0, Performance.get_monitor(Performance.OBJECT_COUNT), Performance.get_monitor(Performance.OBJECT_NODE_COUNT)])
 		print("ENG temp=%.1f pwr=%.2f misfires=%d oil=%.2f cool=%.2f eng=%.1f gbx=%.1f rad=%.1f plugs=%.1f tyre0=%.1f odo=%.0f" % [v.temp, v.power_factor, v.misfire_count, v.oil, v.coolant, v.slots.engine.cond(), v.slots.gearbox.cond(), v.slots.radiator.cond(), v.slots.spark_plugs.cond(), v.wheels[0].slot.cond(), v.odometer])
 		print("t=%.0f ph=%d spd=%.1f rpm=%d gear=%s clutch=%.2f thr=%.2f fz0=%.0f sink=%.2f mud=%.2f slip=%.1f comp=%.2f y=%.2f up=%.2f" % [t, phase, v.speed_kmh, v.engine_rpm, v.gear_text(), v.clutch, v.throttle_eff, w0.fz, w0.sink, w0.surface.get("mud", 0.0), w0.slip, w0.comp, v.global_position.y, v.global_basis.y.y])
+
+
+func _collect_stats() -> void:
+	stats.max_temp = maxf(stats.max_temp, v.temp)
+	if stats.started and not v.running:
+		stats.stalled = true
+	if phase == 3 and t < 1e8:
+		stats.max_gear = maxi(stats.max_gear, v.gear - 1)   # gear index 2 is 1st
+		stats.max_kmh = maxf(stats.max_kmh, v.speed_kmh)
+		if t > 12.0:
+			stats.min_climb_kmh = minf(stats.min_climb_kmh, v.speed_kmh)
+
+
+func _evaluate() -> void:
+	print("STATS ", stats)
+	c.ok(stats.started, "engine started")
+	c.ok(not stats.stalled, "engine never stalled")
+	if phase != 6:
+		c.ok(stats.stop_s >= 0.0, "car came to a stop when braking")
+	if expect.has("min_gear"): c.at_least(stats.max_gear, expect.min_gear, "highest gear")
+	if expect.has("min_kmh"): c.at_least(stats.max_kmh, expect.min_kmh, "top speed km/h")
+	if expect.has("min_climb_kmh"): c.at_least(stats.min_climb_kmh, expect.min_climb_kmh, "lowest speed after 12 s km/h")
+	if expect.has("min_pwr"): c.at_least(v.power_factor, expect.min_pwr, "power factor")
+	if expect.has("max_temp"): c.at_most(stats.max_temp, expect.max_temp, "max temperature C")
+	if expect.has("stop_s"): c.at_most(stats.stop_s if stats.stop_s >= 0.0 else 1e9, expect.stop_s, "braking time s")
+	c.finish()
