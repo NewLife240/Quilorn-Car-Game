@@ -20,6 +20,7 @@ DRIVE="res://tests/drive_test.tscn -- real notraffic vmax=90 stop_s=7 max_temp=1
 TESTS=(
 	"assembly|res://tests/assembly_test.tscn"
 	"interact|res://tests/interact_test.tscn"
+	"exit|res://tests/exit_test.tscn"
 	"world|res://tests/world_test.tscn"
 	"kombi_road_worn48|$DRIVE vid=kombi where=road cond=48 dur=30 min_gear=3 min_kmh=70 min_pwr=0.6"
 	"kombi_road_worn70|$DRIVE vid=kombi where=road cond=70 dur=30 min_gear=3 min_kmh=75 min_pwr=0.75"

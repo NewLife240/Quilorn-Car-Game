@@ -66,7 +66,7 @@ per-size visibility ranges, sleeping idle vehicles, 60 Hz physics with sub-stepp
 - `shaders/` - terrain, water, grass, vegetation particles
 - `assets/` - generated models (`vehicles/`, `parts/`, `buildings/`, `nature/`), textures, sounds, world data
 - `tools/` - Blender and Python generators (`bl_vehicles.py`, `bl_parts.py`, `bl_buildings.py`, `world_gen.py`)
-- `tests/` - headless test scenes (driving, assembly + save/load, interaction, economy rules, screenshots)
+- `tests/` - headless test scenes (driving, assembly + save/load, interaction, getting out of the car, economy rules, screenshots)
 - `tools/economy_sim.py` - economy balance simulator: replays the first game days with sensible / careless /
   bad-investor / min-maxer strategies on the real road network (`python3 tools/economy_sim.py --days 16`)
 
