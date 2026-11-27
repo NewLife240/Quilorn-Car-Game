@@ -93,9 +93,9 @@ func _build_sites() -> void:
 				l.shadow_enabled = true
 				node.add_child(l)
 			elif ipn == "shop_general" or ipn == "shop_gas":
-				_add_interact(node, "Shop", func(_p): world.hud.open_shop("general", _pickup_point(ipmap, node)), Vector3(1.5, 2.2, 1.0))
+				_add_interact(node, "Shop", func(_p): world.hud.open_shop("general", _pickup_point(ipmap, node, ipn)), Vector3(1.5, 2.2, 1.0))
 			elif ipn == "shop_parts":
-				_add_interact(node, "Auto parts store", func(_p): world.hud.open_shop("parts", _pickup_point(ipmap, node)), Vector3(1.6, 2.2, 1.0))
+				_add_interact(node, "Auto parts store", func(_p): world.hud.open_shop("parts", _pickup_point(ipmap, node, ipn)), Vector3(1.6, 2.2, 1.0))
 			elif ipn.begins_with("pump"):
 				var a := _add_interact(node, "Fuel pump", _pump_use, Vector3(1.0, 2.0, 1.0))
 				a.set_meta("pump", true)
@@ -113,10 +113,20 @@ func _build_sites() -> void:
 				junk_site = {"node": node, "pos": node.global_position}
 
 
-func _pickup_point(ipmap: Dictionary, fallback: Node3D) -> Vector3:
+# Where bought items go for buildings without an IP_pickup pallet, as an offset from the shop's
+# interaction point in building space. Both counters are just inside the door, so the old
+# "1.5 m along +Z" fallback dropped the items inside the village shop / gas kiosk where nobody saw them.
+const PICKUP_FROM_COUNTER := {
+	"shop_general": Vector3(2.6, -0.6, -1.6),   # village shop: on the ground right of the front steps
+	"shop_gas": Vector3(2.6, -0.6, -1.2),       # gas station: in front of the kiosk, beside its door
+}
+
+
+func _pickup_point(ipmap: Dictionary, counter: Node3D, ipn: String) -> Vector3:
 	if ipmap.has("pickup"):
 		return (ipmap.pickup.node as Node3D).global_position + Vector3.UP * 0.5
-	return fallback.global_position + fallback.global_basis.z * 1.5 + Vector3.UP * 0.4
+	var off: Vector3 = PICKUP_FROM_COUNTER.get(ipn, Vector3(0, -0.6, -2.0))
+	return counter.global_transform * off + Vector3.UP * 0.4
 
 
 func _add_interact(at: Node3D, text: String, cb: Callable, size: Vector3) -> Area3D:

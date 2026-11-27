@@ -187,19 +187,57 @@ dist, (ir, ic) = ndimage.distance_transform_edt(~road_center, return_indices=Tru
 rh = road_height[ir, ic]
 hw = road_halfw[ir, ic]
 rk = road_kind[ir, ic]
+h_nat = h.copy()   # natural terrain (with location pads); roads and building lots are graded into it below
 blend = np.clip(1 - (dist - hw) / 9.0, 0, 1)
 blend = blend * blend * (3 - 2 * blend)
-h = h * (1 - blend) + rh * blend
+h_road = h * (1 - blend) + rh * blend
 # nearest-centre-pixel heights terrace the road on climbs (~grade x 1 m steps): smooth the corridor
 corr = np.clip(1 - (dist - hw - 2.0) / 4.0, 0, 1)
 for _ in range(2):
-    h = h * (1 - corr) + ndimage.gaussian_filter(h, 1.6) * corr
-# slight crown / ditch for dirt & gravel
-ditch = np.clip(1 - np.abs(dist - hw - 1.6) / 1.2, 0, 1) * (rk >= 2)
-h -= ditch * 0.35
-# ruts in dirt roads
-rut = (rk == 3) * np.clip(1 - np.abs(np.abs(dist) - 0.9) / 0.35, 0, 1) * (dist < hw)
-h -= rut * 0.12
+    h_road = h_road * (1 - corr) + ndimage.gaussian_filter(h_road, 1.6) * corr
+road_mask = dist <= hw + 1.0   # carriageway + shoulder: these heights are fixed
+
+# Cut/fill banks: the road profile is grade-limited, so it can sit metres above or below the natural
+# ground. A fixed 9 m blend made 50-60 degree walls (a trench with buildings stranded on top), so
+# instead the terrain may rise or fall at most BANK_SLOPE per metre away from any fixed surface
+# (road, building lot, driveway). Steeper only where a gentle bank would fill the river or a pond.
+BANK_SLOPE = 0.28   # ~1:3.5, about 16 degrees: a car can drive up or down it
+
+
+def grade(base, mask, fixed, iters=220):
+    # Upper / lower envelopes U = min(F + s*d), L = max(F - s*d) over ALL fixed pixels (chamfer
+    # propagation), so the terrain between two fixed surfaces never gets steeper than the bank slope.
+    c1, c2 = BANK_SLOPE, BANK_SLOPE * math.sqrt(2)
+    cost = np.array([[c2, c1, c2], [c1, 0.0, c1], [c2, c1, c2]], np.float32)
+    U = np.where(mask, fixed, 1e4).astype(np.float32)
+    L = np.where(mask, fixed, -1e4).astype(np.float32)
+    for _ in range(iters):
+        U = ndimage.grey_erosion(U, structure=-cost)
+        L = ndimage.grey_dilation(L, structure=-cost)
+    out = np.clip(base, L, U)
+    # by the river and ponds a gentle bank would fill the water: use the steep nearest-surface cone there
+    dm, (jr, jc) = ndimage.distance_transform_edt(~mask, return_indices=True)
+    fn = fixed[jr, jc]
+    steep = (river_d < 40) | (h_nat < WATER + 1.0)
+    out[steep] = np.clip(base, fn - 0.9 * dm, fn + 0.9 * dm)[steep]
+    # round off the creases at the top and bottom of each bank
+    k = np.clip((dm - 1.0) / 3.0, 0, 1)
+    out = out * (1 - k) + ndimage.gaussian_filter(out, 2.5) * k
+    out[mask] = fixed[mask]
+    return out
+
+
+def road_details(hh):
+    # slight crown / ditch for dirt & gravel
+    ditch = np.clip(1 - np.abs(dist - hw - 1.6) / 1.2, 0, 1) * (rk >= 2)
+    hh = hh - ditch * 0.35
+    # ruts in dirt roads
+    rut = (rk == 3) * np.clip(1 - np.abs(np.abs(dist) - 0.9) / 0.35, 0, 1) * (dist < hw)
+    return hh - rut * 0.12
+
+
+# provisional surface for the preview and object placement; graded for real once the lots are known
+h = road_details(h_road)
 
 # ---------------------------------------------------------------- splat
 splat = np.zeros((N, N, 4), np.float32)
@@ -556,27 +594,91 @@ for o in objs:
     fm[sub & (fm == 0)] = 4
 (field_map[:2048, :2048]).astype(np.uint8).tofile(os.path.join(OUT, "fields.bin"))
 
-# flatten terrain under buildings (and khata yards) so nothing floats; roads are protected
-PAD = {"khata": 13, "khata_b": 13, "khata_tin": 13}
+# ---------------------------------------------------------------- building lots and driveways
+# Every building gets a flat lot at (or within a ramp of) the height of the road next to it, plus a
+# graded driveway from the lot to the road edge; then the terrain is re-graded around roads + lots.
+# Khata lots cover the whole fenced yard (local x -10..10, z -8.5..11.5, front facing the road).
+LOT = {"khata": (-10.5, 10.5, -9.0, 12.0), "khata_b": (-10.5, 10.5, -9.0, 12.0), "khata_tin": (-10.5, 10.5, -9.0, 12.0)}
+LOT_MARGIN = 3.0
+DRIVE_HALF = 2.6
+lot_mask = np.zeros((N, N), bool)
+lot_h = np.zeros((N, N), np.float32)
+drive_mask = np.zeros((N, N), bool)
+lot_log = []
+
+
+def rect_pixels(cx, cz, yaw, x0, x1, z0, z1):
+    R = int(math.ceil(math.hypot(max(-x0, x1), max(-z0, z1)))) + 1
+    r0, c0 = int(round(cz + HALF)), int(round(cx + HALF))
+    r1, r2, c1, c2 = max(0, r0 - R), min(N, r0 + R + 1), max(0, c0 - R), min(N, c0 + R + 1)
+    yy, xx_ = np.mgrid[r1:r2, c1:c2]
+    dx, dz = xx_ - HALF - cx, yy - HALF - cz
+    c, s_ = math.cos(yaw), math.sin(yaw)
+    lx, lz = dx * c - dz * s_, dx * s_ + dz * c
+    return (slice(r1, r2), slice(c1, c2)), (lx >= x0) & (lx <= x1) & (lz >= z0) & (lz <= z1)
+
+
+def local_from_world(o, wx, wz):
+    c, s_ = math.cos(o["rot"]), math.sin(o["rot"])
+    dx, dz = wx - o["x"], wz - o["z"]
+    return dx * c - dz * s_, dx * s_ + dz * c
+
+
 for o in objs:
-    rr = PAD.get(o["kind"], FOOT.get(o["kind"], 0))
-    if rr == 0:
+    if o["kind"] not in FOOTPRINT:
         continue
-    R = rr + 10
-    r0, c0 = int(round(o["z"] + HALF)), int(round(o["x"] + HALF))
-    r1, r2 = max(0, r0 - R), min(N, r0 + R + 1)
-    c1, c2 = max(0, c0 - R), min(N, c0 + R + 1)
-    yy, xx2 = np.mgrid[r1:r2, c1:c2]
-    dd = np.sqrt((yy - r0) ** 2 + (xx2 - c0) ** 2)
-    core = dd <= rr * 0.8
-    target = float(np.median(h[r1:r2, c1:c2][core]))
-    target = max(target, WATER + 1.5)
-    w = np.clip(1 - (dd - rr) / 10.0, 0, 1)
-    w = w * w * (3 - 2 * w)
-    protect = np.clip((dist[r1:r2, c1:c2] - hw[r1:r2, c1:c2] - 1.5) / 4.0, 0, 1)
-    w = w * protect
-    h[r1:r2, c1:c2] = h[r1:r2, c1:c2] * (1 - w) + target * w
+    fx0, fx1, fz0, fz1 = FOOTPRINT[o["kind"]]
+    x0, x1, z0, z1 = LOT.get(o["kind"], (fx0 - LOT_MARGIN, fx1 + LOT_MARGIN, fz0 - LOT_MARGIN, fz1 + LOT_MARGIN))
+    sl, m = rect_pixels(o["x"], o["z"], o["rot"], x0, x1, z0, z1)
+    med = float(np.median(h_nat[sl][m]))
+    gap, p = footprint_gap(o)
+    target = med
+    if p is not None and gap < 40.0:
+        # road height at the road centre nearest to the footprint; the lot may sit a gentle ramp above/below it
+        rr_, rc_ = ir[p], ic[p]
+        ry = float(h_road[rr_, rc_])
+        lim = min(1.5, 0.1 * max(gap, 0.0))
+        target = ry + float(np.clip(med - ry, -lim, lim))
+        # driveway: straight strip from the footprint edge to the road edge, graded linearly
+        px_, pz_ = p[1] - HALF, p[0] - HALF
+        ex, ez = rc_ - HALF, rr_ - HALF
+        L = math.hypot(ex - px_, ez - pz_)
+        if L > 0.5:
+            ux, uz = (ex - px_) / L, (ez - pz_) / L
+            dsl, dm_ = rect_pixels(px_, pz_, math.atan2(ux, uz), -DRIVE_HALF, DRIVE_HALF, -3.0, L)
+            # rect_pixels' local +z runs along (ux, uz) when yaw = atan2(ux, uz)
+            yy, xx_ = np.mgrid[dsl[0], dsl[1]]
+            # the ramp starts where the driveway leaves the lot (khata yards reach past the house front)
+            s0 = 0.0
+            while s0 < L:
+                lx_, lz_ = local_from_world(o, px_ + ux * s0, pz_ + uz * s0)
+                if not (x0 <= lx_ <= x1 and z0 <= lz_ <= z1):
+                    break
+                s0 += 0.25
+            run = max(L - hw[rr_, rc_] - 1.0 - s0, 0.5)
+            t = np.clip(((xx_ - HALF - px_) * ux + (yy - HALF - pz_) * uz - s0) / run, 0, 1)
+            dm_ &= ~road_mask[dsl]
+            lot_mask[dsl] |= dm_
+            drive_mask[dsl] |= dm_
+            lot_h[dsl][dm_] = (target * (1 - t) + ry * t)[dm_]
+        lot_log.append((o["kind"], o["x"], o["z"], med - ry, target - ry))
+    m &= ~road_mask[sl]
+    lot_mask[sl] |= m
+    lot_h[sl][m] = target
     o["y"] = round(target, 2)
+print("lots: %d buildings graded to the road next to them" % len(lot_log))
+for k, x, z, nat_d, lot_d in lot_log:
+    if abs(nat_d) > 1.5:
+        print("  %-18s (%7.1f,%7.1f) ground was %+5.1f m from the road -> lot %+4.1f m" % (k, x, z, nat_d, lot_d))
+fixed = np.where(road_mask, h_road, lot_h).astype(np.float32)
+h = road_details(grade(h_nat, road_mask | lot_mask, fixed))
+# driveways are gravel (no grass on them, so you can see where to turn in)
+dg = np.clip(ndimage.gaussian_filter(drive_mask.astype(np.float32), 0.8) * 1.6, 0, 1)
+splat[..., 1] = np.maximum(splat[..., 1], dg * (1 - splat[..., 0]))
+splat[..., 2] *= 1 - dg
+splat[..., 3] *= 1 - dg
+(np.clip(splat[:2048, :2048], 0, 1) * 255).astype(np.uint8).tofile(os.path.join(OUT, "splat.bin"))
+h = np.maximum(h, WATER - 3.5).astype(np.float32)
 for o in objs:
     if o["kind"] in ("fence_run", "power_pole", "street_lamp", "spawn_player", "wreck"):
         o["y"] = round(H(o["x"], o["z"]), 2)
