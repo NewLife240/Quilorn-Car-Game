@@ -67,6 +67,8 @@ var diff_lock := false
 var auto_gearbox := true
 var throttle_eff := 0.0
 var misfire := 0.0
+var power_factor := 0.0       # combined output multiplier from part condition (debug / HUD)
+var misfire_count := 0
 var lights_on := false
 
 # --- fluids & status
@@ -951,19 +953,24 @@ func _physics_process(dt: float) -> void:
 	var e_inertia: float = e.get("inertia", 0.2)
 	var power_mult := 0.0
 	if e_ok:
-		power_mult = (0.45 + 0.55 * slot_q("engine")) * (0.9 + 0.1 * slot_q("air_filter") if has("air_filter") else 0.9) \
-			* (0.94 if not has("exhaust") else 1.0) * clampf(0.55 + 0.45 * slot_q("carburetor"), 0.0, 1.0)
+		# each part's penalty is mild on its own: they multiply together, so a car with every part
+		# at ~50% keeps ~70% of its power (was ~50% plus constant misfires on the starter Kombi)
+		power_mult = (0.7 + 0.3 * slot_q("engine")) * (0.92 + 0.08 * slot_q("air_filter") if has("air_filter") else 0.9) \
+			* (0.94 if not has("exhaust") else 1.0) * clampf(0.8 + 0.2 * slot_q("carburetor"), 0.0, 1.0)
 		if oil < 0.5:
 			power_mult *= 0.7
 		for sn in ["carburetor", "air_filter", "spark_plugs", "ignition_coil", "exhaust"]:
 			if has(sn):
 				power_mult *= float(DB.part(slots[sn].part_id()).get("power", 1.0))
+	power_factor = power_mult
 	# misfires from worn plugs / carb / coil
 	misfire = move_toward(misfire, 0.0, dt * 6.0)
 	if running:
-		var bad := (1.0 - slot_q("spark_plugs")) * 0.6 + (1.0 - slot_q("carburetor")) * 0.4 + (1.0 - slot_q("ignition_coil")) * 0.3
-		if randf() < bad * dt * 3.0:
+		# parts above ~75% never misfire; below that the rate climbs to ~2/s with everything dead
+		var bad := _misfire_bad(slot_q("spark_plugs")) * 0.6 + _misfire_bad(slot_q("carburetor")) * 0.4 + _misfire_bad(slot_q("ignition_coil")) * 0.3
+		if randf() < bad * dt * 1.5:
 			misfire = 1.0
+			misfire_count += 1
 	# idle governor
 	var idle_thr := 0.0
 	if running:
@@ -1169,6 +1176,10 @@ func _wheel_inertia(w: Dictionary) -> float:
 	return maxf(0.6, 0.55 * pm * w.radius * w.radius + 0.25)
 
 
+func _misfire_bad(q: float) -> float:
+	return clampf((0.75 - q) / 0.75, 0.0, 1.0)
+
+
 func _pacejka(x: float, b: float, c: float, e: float) -> float:
 	var bx := b * x
 	return sin(c * atan(bx - e * (bx - atan(bx))))
@@ -1213,7 +1224,11 @@ func _simulate_engine_state(dt: float, red: float) -> void:
 	var heat := (0.35 + 2.4 * load_f) if running else 0.0
 	var cool := (0.016 + 0.03 * clampf(speed_kmh / 70.0, 0.0, 1.0))
 	if has("radiator"):
-		cool *= clampf(slot_q("radiator") * (coolant / COOLANT_CAP), 0.04, 1.0) * float(DB.part(slots.radiator.part_id()).get("cooling", 1.0))
+		# a worn radiator loses some capacity (clogged fins), low coolant only hurts below half full;
+		# multiplying raw condition by fill level made a 50% radiator boil on a flat road
+		var rad_f := 0.25 + 0.75 * sqrt(slot_q("radiator"))
+		var fill_f := clampf(coolant / (COOLANT_CAP * 0.5), 0.0, 1.0)
+		cool *= clampf(rad_f * fill_f, 0.04, 1.0) * float(DB.part(slots.radiator.part_id()).get("cooling", 1.0))
 	else:
 		cool *= 0.04
 	if temp < 88.0:

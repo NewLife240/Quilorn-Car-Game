@@ -12,6 +12,13 @@ var road_pts: Array = []
 var road_i := 0
 var cond := 100.0
 var start_i := -1
+var dur := -1.0
+var real := false
+var vmax := 999.0
+var shot_dir := ""
+var shot_at: Array = []
+var tp := false
+var v_warm := false
 
 func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
@@ -20,6 +27,14 @@ func _ready() -> void:
 		if a == "shots": shots = true
 		if a.begins_with("cond="): cond = float(a.substr(5))
 		if a.begins_with("i="): start_i = int(a.substr(2))
+		if a.begins_with("dur="): dur = float(a.substr(4))
+		if a == "real": real = true
+		if a.begins_with("vmax="): vmax = float(a.substr(5))
+		if a.begins_with("shot="): shot_dir = a.substr(5)
+		if a.begins_with("shot_at="):
+			for x in a.substr(8).split(","): shot_at.append(float(x))
+		if a == "tp": tp = true
+		if a == "warm": v_warm = true
 	Game.new_game = true
 	world = load("res://scenes/game.tscn").instantiate()
 	add_child(world)
@@ -53,14 +68,27 @@ func _ready() -> void:
 		q = pts[road_i + 2]
 		print("HILL grade %.1f%%" % (best * 100.0))
 	road_pts = pts
+	if "notraffic" in OS.get_cmdline_user_args():
+		world.traffic.process_mode = Node.PROCESS_MODE_DISABLED
+		world.traffic.visible = false
+		for b in world.traffic.find_children("*", "CollisionObject3D", true, false):
+			(b as CollisionObject3D).collision_layer = 0
 	var pos := Vector3(p[0], world.terrain.height_at(p[0], p[2]) + 1.0, p[2])
 	var dir := (Vector3(q[0], 0, q[2]) - Vector3(p[0], 0, p[2])).normalized()
 	v = world.spawn_vehicle(vid, Transform3D(Basis.looking_at(dir, Vector3.UP), pos))
 	v.install_default_parts(cond, cond)
-	v.fuel = 30
-	v.oil = 4
-	v.coolant = 6
+	if not real:
+		v.fuel = 30
+		v.oil = 4
+		v.coolant = 6
+	else:
+		v.fuel = 30
 	world.player.enter_vehicle(v)
+	if v_warm:
+		v.temp = 85.0  # skip the warm-up so short runs show the steady-state temperature
+	if tp:
+		v.camera_mode = 1
+		v._set_camera()
 	print("SPAWN ", vid, " at ", pos, " mass ", v.mass, " surface ", world.terrain.surface(pos.x, pos.z))
 
 func _physics_process(dt: float) -> void:
@@ -76,7 +104,12 @@ func _physics_process(dt: float) -> void:
 		2:
 			if t > 1.0: Input.action_press("forward"); phase = 3; t = 0
 		3:
-			if t > (25.0 if where == "road" else 20.0):
+			# cruise: ease off above vmax, and stop at the end of the road instead of driving into the scenery
+			Input.action_press("forward", 1.0 if v.speed_kmh < vmax else 0.25)
+			if road_i >= road_pts.size() - 2:
+				print("END OF ROAD at t=%.0f" % t)
+				t = 1e9
+			if t > (dur if dur > 0.0 else (25.0 if where == "road" else 20.0)):
 				Input.action_release("forward"); Input.action_press("back"); phase = 4; t = 0
 				if where == "mud":
 					print("toggle awd+low+difflock")
@@ -91,6 +124,14 @@ func _physics_process(dt: float) -> void:
 		6:
 			if t > 15.0:
 				print("DONE"); get_tree().quit()
+	# screenshots at given drive times (phase 3), e.g. shot=/tmp/out shot_at=10,30 (needs a display, not --headless)
+	if shot_dir != "" and phase == 3 and not shot_at.is_empty() and t >= shot_at[0]:
+		shot_at.pop_front()
+		DirAccess.make_dir_recursive_absolute(shot_dir)
+		var img := get_viewport().get_texture().get_image()
+		var fn := "%s/%s_%s_c%d_t%d.png" % [shot_dir, vid, where, int(cond), int(t)]
+		img.save_png(fn)
+		print("SHOT ", fn)
 	# pure-pursuit steering along the road
 	var vp := v.global_position
 	while road_i < road_pts.size() - 1 and Vector2(road_pts[road_i][0] - vp.x, road_pts[road_i][2] - vp.z).length() < 9.0:
@@ -110,4 +151,5 @@ func _physics_process(dt: float) -> void:
 			ws += " [%d g%d w*r=%.1f vl=%.1f fz=%.0f fx=%.0f]" % [w.i, int(w.grounded), w.omega * w.radius, w.get("vlong", 0.0), w.fz, w.fx]
 		print(ws)
 		print("PERF process=%.2fms physics=%.2fms objects=%d nodes=%d" % [Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0, Performance.get_monitor(Performance.OBJECT_COUNT), Performance.get_monitor(Performance.OBJECT_NODE_COUNT)])
+		print("ENG temp=%.1f pwr=%.2f misfires=%d oil=%.2f cool=%.2f eng=%.1f gbx=%.1f rad=%.1f plugs=%.1f tyre0=%.1f odo=%.0f" % [v.temp, v.power_factor, v.misfire_count, v.oil, v.coolant, v.slots.engine.cond(), v.slots.gearbox.cond(), v.slots.radiator.cond(), v.slots.spark_plugs.cond(), v.wheels[0].slot.cond(), v.odometer])
 		print("t=%.0f ph=%d spd=%.1f rpm=%d gear=%s clutch=%.2f thr=%.2f fz0=%.0f sink=%.2f mud=%.2f slip=%.1f comp=%.2f y=%.2f up=%.2f" % [t, phase, v.speed_kmh, v.engine_rpm, v.gear_text(), v.clutch, v.throttle_eff, w0.fz, w0.sink, w0.surface.get("mud", 0.0), w0.slip, w0.comp, v.global_position.y, v.global_basis.y.y])
