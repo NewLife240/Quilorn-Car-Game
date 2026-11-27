@@ -50,7 +50,7 @@ Inspired by the mechanics of the car-assembly, off-road and logistics/industry g
 | Z / X | 2WD-AWD-LOW / differential lock |
 | L / H | lights / horn |
 | J | load / unload cargo in a marker |
-| E | get out |
+| E | get out (below 8 km/h; the handbrake goes on) |
 | Backspace | put the car back on its wheels (slow speed only) |
 
 ## Performance
@@ -66,7 +66,7 @@ per-size visibility ranges, sleeping idle vehicles, 60 Hz physics with sub-stepp
 - `shaders/` - terrain, water, grass, vegetation particles
 - `assets/` - generated models (`vehicles/`, `parts/`, `buildings/`, `nature/`), textures, sounds, world data
 - `tools/` - Blender and Python generators (`bl_vehicles.py`, `bl_parts.py`, `bl_buildings.py`, `world_gen.py`)
-- `tests/` - headless test scenes (driving, assembly + save/load, interaction, economy rules, screenshots)
+- `tests/` - headless test scenes (driving, assembly + save/load, interaction, getting out of the car, economy rules, screenshots)
 - `tools/economy_sim.py` - economy balance simulator: replays the first game days with sensible / careless /
   bad-investor / min-maxer strategies on the real road network (`python3 tools/economy_sim.py --days 16`)
 

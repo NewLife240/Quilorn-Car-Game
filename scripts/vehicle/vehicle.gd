@@ -569,6 +569,14 @@ func enter(p: Node) -> void:
 	play_fx("res://assets/sounds/Car_Door_Close.ogg", -6)
 
 
+## Above this speed the driver can't get out (the car would roll away on its own).
+const EXIT_MAX_KMH := 8.0
+
+
+func can_exit() -> bool:
+	return linear_velocity.length() * 3.6 <= EXIT_MAX_KMH
+
+
 func exit_vehicle() -> Vector3:
 	var p := driver
 	driver = null
@@ -576,7 +584,8 @@ func exit_vehicle() -> Vector3:
 	in_throttle = 0.0
 	in_brake = 0.0
 	in_steer = 0.0
-	in_handbrake = 1.0 if speed_kmh < 3.0 else 0.0
+	# the driver always pulls the handbrake on the way out, so the car can't roll off without them
+	in_handbrake = 1.0
 	fp_cam.current = false
 	tp_cam.current = false
 	_set_shell_cull(false)
@@ -1161,6 +1170,15 @@ func _physics_process(dt: float) -> void:
 	if spd < 0.25 and _wheel_ground >= 3 and (driver == null or (in_throttle < 0.05 and (in_brake > 0.1 or in_handbrake > 0.1 or gear == 1 or clutch < 0.05))):
 		linear_velocity *= 0.85
 		angular_velocity *= 0.85
+		if driver == null and in_handbrake > 0.5:
+			# handbrake on, nobody inside: hold the car on a slope instead of letting it creep downhill
+			var nrm := Vector3.ZERO
+			for w in wheels:
+				if w.grounded:
+					nrm += w.normal
+			nrm = nrm.normalized()
+			var g := get_gravity()
+			apply_central_force(-(g - nrm * g.dot(nrm)) * mass)
 	# ---------- running costs
 	_simulate_engine_state(dt, red)
 	_impact_check(dt)

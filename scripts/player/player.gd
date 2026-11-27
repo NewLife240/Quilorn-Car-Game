@@ -514,6 +514,9 @@ func exit_vehicle() -> void:
 	if vehicle == null:
 		return
 	var v := vehicle
+	if not v.can_exit():
+		Game.notify("Slow down to get out", "warn")
+		return
 	var p := v.exit_vehicle()
 	vehicle = null
 	visible = true
