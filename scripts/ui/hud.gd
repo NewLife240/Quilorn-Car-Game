@@ -196,10 +196,16 @@ func _update_dash(v: Vehicle) -> void:
 	dash_warn.text = "  ".join(w)
 
 
+var _check_sig := ""
+var _jobs_sig := ""
+
+
 func _update_checklist() -> void:
-	for c in check_box.get_children():
-		c.queue_free()
 	if Game.flags.get("tutorial_done", false):
+		if _check_sig != "done":
+			_check_sig = "done"
+			for c in check_box.get_children():
+				c.queue_free()
 		return
 	var car: Vehicle = null
 	for v in Game.world.vehicles:
@@ -207,6 +213,10 @@ func _update_checklist() -> void:
 			car = v
 			break
 	if car == null:
+		if _check_sig != "none":
+			_check_sig = "none"
+			for c in check_box.get_children():
+				c.queue_free()
 		return
 	var rear_ok: bool = car.slots.wheel2.is_tight() and car.slots.wheel3.is_tight()
 	var items := [
@@ -219,6 +229,13 @@ func _update_checklist() -> void:
 		["Buy an air filter (village shop / Stepove parts)", car.has("air_filter")],
 		["Take a delivery job (TAB → Jobs)", Game.stats.deliveries > 0 or not Game.world.economy.active.is_empty()],
 	]
+	# rebuild the labels only when a line actually changed
+	var sig := str(items.map(func(it): return it[1]))
+	if sig == _check_sig:
+		return
+	_check_sig = sig
+	for c in check_box.get_children():
+		c.queue_free()
 	var done := 0
 	check_box.add_child(UIKit.label("Get the Kombi running", 18, UIKit.ACCENT, true))
 	for it in items:
@@ -231,13 +248,25 @@ func _update_checklist() -> void:
 
 
 func _update_jobs_hud() -> void:
-	for c in jobs_box.get_children():
-		c.queue_free()
 	var eco = Game.world.economy
+	var lines := []
 	for j in eco.active:
 		var target: String = j.to if j.loaded else j.from
 		var d := (Game.player.global_position as Vector3).distance_to(eco.site_pos(target))
-		jobs_box.add_child(UIKit.label("%s %d× %s → %s  (%dm)  ₴%d" % ["🚚" if j.loaded else "📦", j.units, DB.GOODS[j.good].name, eco.site_name(target), int(d), j.pay], 15, Color(0.85, 0.9, 1.0)))
+		lines.append("%s %d× %s → %s  (%dm)  ₴%d" % ["🚚" if j.loaded else "📦", j.units, DB.GOODS[j.good].name, eco.site_name(target), int(d), j.pay])
+	var sig := "\n".join(lines)
+	if sig == _jobs_sig:
+		return
+	_jobs_sig = sig
+	var labels := jobs_box.get_children()
+	if labels.size() == lines.size():
+		for i in range(lines.size()):
+			(labels[i] as Label).text = lines[i]
+		return
+	for c in labels:
+		c.queue_free()
+	for l in lines:
+		jobs_box.add_child(UIKit.label(l, 15, Color(0.85, 0.9, 1.0)))
 
 
 func _on_notify(text: String, kind: String) -> void:

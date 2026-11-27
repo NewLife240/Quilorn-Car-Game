@@ -25,6 +25,9 @@ var traffic: Node
 var ambience: Node
 var rain_hf: GPUParticlesCollisionHeightField3D
 var _light_t := 0.0
+var _night := -1
+var _sky_key := Vector2(-1, -1)
+var perf_watch: Node
 
 
 func _ready() -> void:
@@ -68,6 +71,10 @@ func _ready() -> void:
 	hud.name = "HUD"
 	add_child(hud)
 	Game.hud = hud
+	perf_watch = preload("res://scripts/debug/perf_watch.gd").new()
+	perf_watch.name = "PerfWatch"
+	add_child(perf_watch)
+	perf_watch.setup(self)
 	var st := Game.pending_world_state()
 	if st.is_empty():
 		_new_game()
@@ -157,7 +164,8 @@ func _build_environment() -> void:
 	rain_hf = GPUParticlesCollisionHeightField3D.new()
 	rain_hf.size = Vector3(60, 60, 60)
 	rain_hf.resolution = GPUParticlesCollisionHeightField3D.RESOLUTION_256
-	rain_hf.update_mode = GPUParticlesCollisionHeightField3D.UPDATE_MODE_ALWAYS
+	# re-render the occlusion map only when the camera moves, not every frame while parked
+	rain_hf.update_mode = GPUParticlesCollisionHeightField3D.UPDATE_MODE_WHEN_MOVED
 	rain_hf.follow_camera_enabled = true
 	rain_hf.visible = false
 	add_child(rain_hf)
@@ -256,10 +264,17 @@ func _update_daylight() -> void:
 	sun.visible = day > 0.01
 	moon.light_energy = (1.0 - day) * 0.2
 	moon.visible = day < 0.95
-	var night := day < 0.3 or weather > 0.85
-	for l in props.street_lights:
-		l.visible = night
-	traffic.set_night(night)
+	var night := 1 if (day < 0.3 or weather > 0.85) else 0
+	if night != _night:
+		_night = night
+		for l in props.street_lights:
+			l.visible = night == 1
+		traffic.set_night(night == 1)
+	# every sky material change re-bakes the sky radiance on the GPU: only touch it on visible changes
+	var key := Vector2(snappedf(h, 0.05), snappedf(weather, 0.02))
+	if key == _sky_key:
+		return
+	_sky_key = key
 	var overcast := weather
 	sky_mat.sky_top_color = Color(0.03, 0.05, 0.1).lerp(Color(0.26, 0.46, 0.78).lerp(Color(0.42, 0.46, 0.5), overcast), day)
 	sky_mat.sky_horizon_color = Color(0.05, 0.07, 0.12).lerp(Color(0.68, 0.74, 0.82).lerp(Color(0.95, 0.65, 0.45), golden * 0.6).lerp(Color(0.55, 0.57, 0.6), overcast), day)
