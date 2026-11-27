@@ -514,21 +514,29 @@ func exit_vehicle() -> void:
 	if vehicle == null:
 		return
 	var v := vehicle
-	if not v.can_exit():
-		Game.notify("Slow down to get out", "warn")
-		return
 	var p := v.exit_vehicle()
 	vehicle = null
 	visible = true
-	for c in get_children():
-		if c is CollisionShape3D:
-			c.disabled = false
+	# Move to the door with collisions still off and turn them on only after the physics step.
+	# Jolt moves a kinematic body to a new position over the next step, so with the capsule on
+	# the player would sweep from the car's centre to the door at ~90 m/s and launch the car.
 	global_position = p
 	reset_physics_interpolation()
+	_enable_collision_after_move()
 	var f := -v.global_basis.z
 	_yaw = atan2(-f.x, -f.z) + PI * 0.5
 	_pitch = 0.0
 	cam.current = true
+
+
+func _enable_collision_after_move() -> void:
+	for i in 2:
+		await get_tree().physics_frame
+	if vehicle != null:
+		return
+	for c in get_children():
+		if c is CollisionShape3D:
+			c.disabled = false
 
 
 func save_state() -> Dictionary:

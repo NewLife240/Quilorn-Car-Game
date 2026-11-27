@@ -1,93 +1,63 @@
 extends Node
-## Getting out of the car (headless, pass/fail):  godot --headless --path . res://tests/exit_test.tscn
-## Drives the starter Kombi with the engine running, then:
-##  1. tries to get out at speed: refused, the player stays inside;
-##  2. brakes until getting out is allowed, gets out: the car stops within a few metres;
-##  3. drives again, stops on a slope, gets out with the engine idling: the car stays put.
-## Before the fix the car kept coasting in gear with nobody inside and rolled 100+ m away.
+## Getting out of the car must not launch it (headless, pass/fail):
+##   godot --headless --path . res://tests/exit_test.tscn
+## While driving, the player body rides at the car's centre with its capsule off. Getting out used to
+## turn the capsule on and then move the player to the door; Jolt moves a kinematic body to its new
+## position over the next step, so the capsule swept through the car at ~90 m/s and the car flew
+## 150-200 m. Gets out of the starter Kombi at 12 spots around the map (4 of them launched it before
+## the fix) and checks that the car's speed never jumps. Rolling down a slope afterwards is fine.
 const Check = preload("res://tests/check.gd")
-var c: Check
-var world: World
-var v: Vehicle
-var pl: Player
+const SPOTS := 12
+const MAX_JUMP := 15.0   # m/s change in one physics frame; a launch was 85-115 m/s
 
 func _ready() -> void:
-	c = Check.new("exit", get_tree(), 120.0)
+	var c := Check.new("exit", get_tree(), 200.0)
 	Game.new_game = true
-	world = load("res://scenes/game.tscn").instantiate()
+	var world: World = load("res://scenes/game.tscn").instantiate()
 	add_child(world)
 	await _frames(2)
 	world.traffic.process_mode = Node.PROCESS_MODE_DISABLED
 	for b in world.traffic.find_children("*", "CollisionObject3D", true, false):
 		(b as CollisionObject3D).collision_layer = 0
-	var pts: Array = world.data.roads[0].pts
-	var p: Array = pts[60]
-	var q: Array = pts[64]
-	var pos := Vector3(p[0], world.terrain.height_at(p[0], p[2]) + 1.0, p[2])
-	var dir := (Vector3(q[0], 0, q[2]) - Vector3(p[0], 0, p[2])).normalized()
-	v = world.spawn_vehicle("kombi", Transform3D(Basis.looking_at(dir, Vector3.UP), pos))
-	v.install_default_parts(48, 48)
-	v.fuel = 30
-	pl = world.player
-	pl.enter_vehicle(v)
-	v.auto_gearbox = true
-	await _frames(60)
-	Input.action_press("ignition")
-	for i in 240:
-		await _frames(1)
-		if v.running: break
-	Input.action_release("ignition")
-	if not c.ok(v.running, "engine started"):
-		c.finish()
-		return
-	# 1 + 2: get out at speed
-	await _drive(240)
-	print("AT SPEED: %.1f km/h gear %s" % [v.speed_kmh, v.gear_text()])
-	pl.exit_vehicle()
-	c.ok(pl.vehicle == v, "can't get out at %.0f km/h" % v.speed_kmh)
-	Input.action_press("back")
-	for i in 600:
-		if v.can_exit(): break
-		await _frames(1)
-	Input.action_release("back")
-	print("SLOWED: %.1f km/h gear %s" % [v.speed_kmh, v.gear_text()])
-	pl.exit_vehicle()
-	c.ok(pl.vehicle == null, "can get out once slowed to %.1f km/h" % v.speed_kmh)
-	await _check_parked("slowed down", 3.0)
-	# 3: stop on the road with the brake pedal, get out with the engine idling
-	pl.enter_vehicle(v)
-	await _frames(10)
-	await _drive(120)
-	Input.action_press("back")
-	for i in 600:
-		await _frames(1)
-		if v.speed_kmh < 1.0: break
-	await _frames(30)
-	Input.action_release("back")
-	print("STOPPED: %.1f km/h gear %s running %s" % [v.speed_kmh, v.gear_text(), v.running])
-	pl.exit_vehicle()
-	c.ok(pl.vehicle == null, "can get out of a stopped car")
-	await _check_parked("stopped, engine idling", 0.5)
+	var pl: Player = world.player
+	var car: Vehicle = world.vehicles.filter(func(v): return v.owned)[0]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	var base := car.global_position
+	for k in SPOTS:
+		var pos := base + Vector3(rng.randf_range(-150, 150), 0, rng.randf_range(-150, 150))
+		pos.y = world.terrain.height_at(pos.x, pos.z) + 1.0
+		car.global_transform = Transform3D(Basis(Vector3.UP, rng.randf() * TAU), pos)
+		car.linear_velocity = Vector3.ZERO
+		car.angular_velocity = Vector3.ZERO
+		car.reset_physics_interpolation()
+		pl.enter_vehicle(car)
+		await _frames(150)
+		# press E the way the game does
+		await get_tree().process_frame
+		_press("interact", true)
+		await get_tree().process_frame
+		_press("interact", false)
+		var jump := 0.0
+		var prev := car.linear_velocity
+		for i in 60:
+			await _frames(1)
+			jump = maxf(jump, (car.linear_velocity - prev).length())
+			prev = car.linear_velocity
+		var gap := Vector2(pl.global_position.x - car.global_position.x, pl.global_position.z - car.global_position.z).length()
+		print("SPOT %d: car speed jumped by %.2f m/s at most, now %.1f km/h; player %.2f m from car" % [k, jump, car.linear_velocity.length() * 3.6, gap])
+		c.ok(pl.vehicle == null, "spot %d: got out" % k)
+		c.ok(jump < MAX_JUMP, "spot %d: car not launched (speed jump %.1f m/s)" % [k, jump])
+		if pl.vehicle:
+			pl.exit_vehicle()
 	c.finish()
 
 
-func _drive(frames: int) -> void:
-	Input.action_press("forward")
-	await _frames(frames)
-	Input.action_release("forward")
-
-
-## After getting out: the car must stop within `max_m` and then not creep at all.
-func _check_parked(what: String, max_m: float) -> void:
-	var p0 := v.global_position
-	await _frames(240)
-	var p1 := v.global_position
-	await _frames(600)
-	var moved := p0.distance_to(v.global_position)
-	var creep := p1.distance_to(v.global_position)
-	print("PARKED (%s): moved %.2f m, then %.3f m in 10 s, engine running %s, player %.2f m from car" % [what, moved, creep, v.running, pl.global_position.distance_to(v.global_position)])
-	c.ok(moved < max_m, "%s: car stops within %.1f m (moved %.2f m)" % [what, max_m, moved])
-	c.ok(creep < 0.1, "%s: car doesn't creep with the handbrake on (%.3f m in 10 s)" % [what, creep])
+func _press(action: String, pressed: bool) -> void:
+	var ev := InputEventAction.new()
+	ev.action = action
+	ev.pressed = pressed
+	Input.parse_input_event(ev)
 
 
 func _frames(n: int) -> void:

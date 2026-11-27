@@ -50,7 +50,7 @@ Inspired by the mechanics of the car-assembly, off-road and logistics/industry g
 | Z / X | 2WD-AWD-LOW / differential lock |
 | L / H | lights / horn |
 | J | load / unload cargo in a marker |
-| E | get out (below 8 km/h; the handbrake goes on) |
+| E | get out |
 | Backspace | put the car back on its wheels (slow speed only) |
 
 ## Performance
