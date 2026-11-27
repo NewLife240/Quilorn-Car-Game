@@ -354,7 +354,11 @@ func _continuous_actions(dt: float) -> void:
 			if _use_hold > 2.0:
 				_use_hold = 0.0
 				var s := col as PartSlot
-				s.data.cond = minf(100.0, s.cond() + float(def.repair))
+				# a kit patches cheap parts well; on an expensive engine it only buys a few percent,
+				# so kits can't be used to pump up a car's resale value
+				var pprice := float(DB.part(s.part_id()).get("price", 100))
+				var amt := float(def.repair) * clampf(float(def.get("repair_ref_price", 300.0)) / maxf(pprice, 1.0), 0.05, 1.0)
+				s.data.cond = minf(100.0, s.cond() + amt)
 				Game.notify("Repaired %s to %d%%" % [DB.part(s.part_id()).name, int(s.cond())])
 				var it := held
 				_release()

@@ -52,7 +52,7 @@ var ITEMS := {
 	"jerrycan": {"name": "Jerry Can", "price": 40, "mass": 2.0, "mesh": P + "jerrycan.glb", "fluid": "fuel", "capacity": 20.0},
 	"oil_bottle": {"name": "Motor Oil 4L", "price": 30, "mass": 0.5, "mesh": P + "oil_bottle.glb", "fluid": "oil", "capacity": 4.0},
 	"coolant_bottle": {"name": "Coolant 5L", "price": 22, "mass": 0.5, "mesh": P + "coolant_bottle.glb", "fluid": "coolant", "capacity": 5.0},
-	"repair_kit": {"name": "Repair Kit", "price": 60, "mass": 3.0, "mesh": "res://assets/props/crate.glb", "scale": 0.35, "repair": 35.0},
+	"repair_kit": {"name": "Repair Kit", "price": 60, "mass": 3.0, "mesh": "res://assets/props/crate.glb", "scale": 0.35, "repair": 35.0, "repair_ref_price": 300.0},
 	"spray_paint": {"name": "Spray Paint (repaint a car)", "price": 45, "mass": 0.4, "mesh": P + "oil_bottle.glb", "scale": 0.7, "paint": true},
 	"diesel_can": {"name": "Jerry Can 20L (empty)", "price": 35, "mass": 2.0, "mesh": P + "jerrycan.glb", "fluid": "fuel", "capacity": 20.0, "empty": true},
 }
@@ -112,7 +112,7 @@ var GOODS := {
 	"bread": {"name": "Bread", "kind": "crate", "price": 115, "mass": 80.0, "mesh": "res://assets/props/crate.glb"},
 	"sunflower": {"name": "Sunflower Seeds", "kind": "bulk", "price": 44, "mass": 260.0, "mesh": "res://assets/props/sacks.glb"},
 	"sunflower_oil": {"name": "Sunflower Oil", "kind": "crate", "price": 150, "mass": 180.0, "mesh": "res://assets/props/barrel.glb"},
-	"gravel": {"name": "Gravel", "kind": "bulk", "price": 22, "mass": 500.0, "mesh": "res://assets/props/sacks.glb"},
+	"gravel": {"name": "Gravel", "kind": "bulk", "price": 45, "mass": 500.0, "mesh": "res://assets/props/sacks.glb"},
 }
 
 # rate: production cycles per game hour.  inputs/outputs per cycle.

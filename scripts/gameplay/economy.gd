@@ -5,6 +5,15 @@ extends Node
 const STORAGE := 80
 const FUEL_PRICE := 2.2
 const MAX_ACTIVE_JOBS := 3
+# --- balance knobs (simulated with tools/economy_sim.py, which reads these constants)
+const SMALL_PARCEL_JOBS := 4       # 1-2 unit parcel runs always on the board, so the starter car has work
+const DRIVER_WAGE := 600           # per hired driver per day
+const DRIVER_HIRE := 500           # one-off hiring fee
+const ROUTE_UNITS := 6             # units a hired driver hauls per trip
+const ROUTE_LEGS := 2.0            # drivers drive there and back (trip = 30 min + legs * distance / 6 m per min)
+const PRICE_FLOOR := 0.5           # oversupplied buyers still pay half the base price
+const INDUSTRY_PRICE_CAP := 1.0    # factories buy inputs at no more than base price (no scarcity premium)
+const CONSUMER_STOCK_MAX := 60     # shops/warehouse resell surplus, so a glut clears within a day
 
 var world: Node
 var industries := {}      # key -> {key, def, owner, inp:{}, out:{}, level, pos, load, deliver, office, prod}
@@ -20,6 +29,9 @@ var junk_site: Dictionary = {}
 var _last_market_day := -1
 var _last_junk_day := -1
 var _pump_target: Node = null
+var _last_cost_day := -1
+var _ff := false          # fast-forwarding (sleep): no per-trip notifications
+var _ff_income := 0
 
 
 func setup(w: Node) -> void:
@@ -223,11 +235,13 @@ func site_pos(key: String) -> Vector3:
 func price(good: String, site: String = "") -> int:
 	var base: float = DB.GOODS[good].price
 	var stock := 20.0
+	var cap := 1.45
 	if consumers.has(site):
 		stock = float(consumers[site].stock.get(good, 20))
 	elif industries.has(site):
 		stock = float(industries[site].inp.get(good, 20))
-	return int(base * clampf(1.45 - stock / 50.0, 0.55, 1.45))
+		cap = INDUSTRY_PRICE_CAP
+	return int(base * clampf(1.45 - stock / 50.0, PRICE_FLOOR, cap))
 
 
 func buyers_of(good: String) -> Array:
@@ -302,7 +316,11 @@ func _on_hour(day: int, hour: int) -> void:
 	# expire jobs
 	var now := day * 1440 + hour * 60
 	jobs = jobs.filter(func(j): return int(j.expires) > now)
-	if hour == 0:
+	# charge once per new day - also when the player slept through midnight
+	if _last_cost_day < 0:
+		_last_cost_day = day
+	elif day != _last_cost_day:
+		_last_cost_day = day
 		_daily_costs()
 	if day != _last_market_day and hour == 6:
 		if day - _last_market_day >= 2 or _last_market_day < 0:
@@ -317,7 +335,7 @@ func _daily_costs() -> void:
 		if industries[k].owner == "player":
 			total += int(DB.INDUSTRIES[k].upkeep) * int(industries[k].level)
 	for r in routes:
-		total += 260 * int(r.trucks)
+		total += DRIVER_WAGE * int(r.trucks)
 	if total > 0:
 		Game.add_money(-total, "Daily upkeep & wages")
 
@@ -354,6 +372,19 @@ func _generate_jobs() -> void:
 			if DB.GOODS[g].kind == "crate":
 				units = randi_range(2, 8)
 			_add_job(g, units, a, b, int(units * (28 + dist * 0.17)))
+	# the board can fill up with bulk/crate jobs; keep a few small parcel runs for small cars
+	var small := jobs.filter(func(j): return j.good == "parcel" and int(j.units) <= 2).size()
+	var sites: Array = industries.keys() + consumers.keys()
+	tries = 0
+	while small < SMALL_PARCEL_JOBS and tries < 20:
+		tries += 1
+		var pa: String = sites.pick_random()
+		var pb: String = sites.pick_random()
+		if pa == pb:
+			continue
+		var pu := randi_range(1, 2)
+		_add_job("parcel", pu, pa, pb, int(pu * (45 + site_pos(pa).distance_to(site_pos(pb)) * 0.16)))
+		small += 1
 
 
 func _add_job(good: String, units: int, a: String, b: String, pay: int) -> void:
@@ -440,7 +471,7 @@ func cargo_action(v: Vehicle) -> void:
 func _receive_goods(site: String, good: String, units: int) -> void:
 	if consumers.has(site):
 		var st: Dictionary = consumers[site].stock
-		st[good] = int(st.get(good, 0)) + units
+		st[good] = mini(CONSUMER_STOCK_MAX, int(st.get(good, 0)) + units)
 	elif industries.has(site) and DB.INDUSTRIES[site].in.has(good):
 		var ind: Dictionary = industries[site]
 		ind.inp[good] = mini(STORAGE * int(ind.level) * 2, int(ind.inp.get(good, 0)) + units)
@@ -498,13 +529,17 @@ func upgrade_industry(key: String) -> void:
 func hire_route(from: String, to: String, good: String) -> void:
 	for r in routes:
 		if r.from == from and r.to == to and r.good == good:
-			r.trucks = int(r.trucks) + 1
-			Game.add_money(-500, "Hired another driver")
+			if Game.spend(DRIVER_HIRE, "Hired another driver"):
+				r.trucks = int(r.trucks) + 1
 			return
-	if not Game.spend(500, "Hired a driver"):
+	if not Game.spend(DRIVER_HIRE, "Hired a driver"):
 		return
-	var dist := site_pos(from).distance_to(site_pos(to))
-	routes.append({"from": from, "to": to, "good": good, "trucks": 1, "t": 0.0, "trip": 30.0 + dist / 6.0})
+	routes.append({"from": from, "to": to, "good": good, "trucks": 1, "t": 0.0, "trip": route_trip_minutes(from, to)})
+
+
+## Game minutes for one hired-driver round: loading + driving there and back.
+func route_trip_minutes(from: String, to: String) -> float:
+	return 30.0 + ROUTE_LEGS * site_pos(from).distance_to(site_pos(to)) / 6.0
 
 
 func fire_route(i: int) -> void:
@@ -519,7 +554,7 @@ func _route_trip(r: Dictionary) -> void:
 	var src: Dictionary = industries.get(r.from, {})
 	if src.is_empty() or src.owner != "player":
 		return
-	var units := mini(8 * int(r.trucks), int(src.out.get(r.good, 0)))
+	var units := mini(ROUTE_UNITS * int(r.trucks), int(src.out.get(r.good, 0)))
 	if units <= 0:
 		return
 	src.out[r.good] = int(src.out[r.good]) - units
@@ -528,7 +563,11 @@ func _route_trip(r: Dictionary) -> void:
 	else:
 		var p := price(r.good, r.to)
 		_receive_goods(r.to, r.good, units)
-		Game.add_money(p * units, "Route: %d x %s → %s" % [units, DB.GOODS[r.good].name, site_name(r.to)])
+		if _ff:
+			_ff_income += p * units
+			Game.add_money(p * units)
+		else:
+			Game.add_money(p * units, "Route: %d x %s → %s" % [units, DB.GOODS[r.good].name, site_name(r.to)])
 
 
 func _open_office(_p, key: String) -> void:
@@ -541,11 +580,31 @@ func _sleep(_p) -> void:
 	if h > 6.0 and h < 19.0:
 		Game.notify("You're not tired yet (sleep after 19:00)")
 		return
-	if h >= 19.0:
-		Game.day += 1
+	# the world keeps going overnight: production, hired drivers, job board, daily upkeep
+	var skip := (1440.0 - Game.minutes + 420.0) if h >= 19.0 else (420.0 - Game.minutes)
+	_fast_forward(int(skip))
 	Game.minutes = 7.0 * 60.0
 	Game.notify("You slept until 07:00")
+	if _ff_income > 0:
+		Game.notify("Overnight your drivers sold goods for ₴%d" % _ff_income, "money")
 	Game.save_game()
+
+
+## Run the economy for `total` game minutes in one go (sleeping), emitting every hour on the way.
+func _fast_forward(total: int) -> void:
+	_ff = true
+	_ff_income = 0
+	for i in range(total):
+		Game.minutes += 1.0
+		if Game.minutes >= 1440.0:
+			Game.minutes -= 1440.0
+			Game.day += 1
+		_tick_minute()
+		var hr := int(Game.minutes / 60.0)
+		if hr != Game._last_hour:
+			Game._last_hour = hr
+			Game.hour_passed.emit(Game.day, hr)
+	_ff = false
 
 
 func _charge_batteries(_p, node: Node3D) -> void:
@@ -660,7 +719,8 @@ func _refresh_car_market() -> void:
 
 
 func sell_vehicle_value(v: Vehicle) -> int:
-	return int(v.value() * 0.9 / 10.0) * 10
+	# below the lowest asking price (0.85x), so a car is only worth flipping after you fix it up
+	return int(v.value() * 0.8 / 10.0) * 10
 
 
 func sell_vehicle_at_market() -> void:
@@ -733,7 +793,8 @@ func new_game() -> void:
 func save_state() -> Dictionary:
 	return {"industries": industries.values().map(func(i): return {"key": i.key, "owner": i.owner, "inp": i.inp, "out": i.out, "level": i.level}),
 		"consumers": consumers.values().map(func(c): return {"key": c.key, "stock": c.stock}),
-		"jobs": jobs, "active": active, "routes": routes, "next_id": next_id, "market_day": _last_market_day, "junk_day": _last_junk_day}
+		"jobs": jobs, "active": active, "routes": routes, "next_id": next_id, "market_day": _last_market_day, "junk_day": _last_junk_day,
+		"cost_day": _last_cost_day}
 
 
 func load_state(d: Dictionary) -> void:
@@ -749,9 +810,12 @@ func load_state(d: Dictionary) -> void:
 	jobs = d.get("jobs", [])
 	active = d.get("active", [])
 	routes = d.get("routes", [])
+	for r in routes:
+		r.trip = route_trip_minutes(r.from, r.to)  # older saves used one-way trips
 	next_id = int(d.get("next_id", 1))
 	_last_market_day = int(d.get("market_day", -1))
 	_last_junk_day = int(d.get("junk_day", -1))
+	_last_cost_day = int(d.get("cost_day", -1))
 	# vehicles for sale were saved with the world; mark them
 	for v in world.vehicles:
 		if not v.owned:
