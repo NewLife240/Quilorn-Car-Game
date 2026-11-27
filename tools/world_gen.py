@@ -327,6 +327,8 @@ village_types = ["khata", "khata_b", "khata", "khata_tin"]
 vi = 0
 BUILT.append((LOC["home"]["x"], LOC["home"]["z"], 40))
 BUILT.append((LOC["gas_west"]["x"], LOC["gas_west"]["z"], 25))
+# village shop (placed below): keep khata yards off its plot
+BUILT.append((LOC["village"]["x"] + 30, LOC["village"]["z"] - 60, 3))
 for rd_idx, spans in [(0, (-430, -60)), (3, (-180, 0))]:
     d = ROADS[rd_idx]["dense"]
     last = None
@@ -347,12 +349,13 @@ for rd_idx, spans in [(0, (-430, -60)), (3, (-180, 0))]:
             if not free_spot(px, pz, 13.0, 1.0):
                 continue
             yaw = math.atan2(n[0] * side, n[1] * side)
-            place(village_types[vi % 4], px, pz, yaw)
+            house = place(village_types[vi % 4], px, pz, yaw)
+            house["_yard"] = []
             BUILT.append((px, pz, 13.0))
             # yard fence: front (with gate), both sides and back
             for (lx, lz, L, rot) in [(0, -8.5, 20, 0.0), (-10, 1.5, 20, math.pi / 2), (10, 1.5, 20, math.pi / 2), (0, 11.5, 20, 0.0)]:
                 fx, fz = local_to_world(px, pz, yaw, lx, lz)
-                place("fence_run", fx, fz, yaw + rot, length=L, yard=True)
+                house["_yard"].append(place("fence_run", fx, fz, yaw + rot, length=L, yard=True))
             vi += 1
         last = (x, z)
 L = LOC["village"]
@@ -427,6 +430,75 @@ for rd_idx, keep in [(0, lambda x, z: -430 < x < 330), (3, lambda x, z: z < 470)
             place("street_lamp", px, pz, math.atan2(n[0] * side, n[1] * side))
         k += 1
 
+# ---------------------------------------------------------------- setback from roads
+# Local footprints (x0, x1, z0, z1) = axis-aligned bounds of assets/buildings/<kind>.glb in model space
+# (front faces -Z). Checking the real rotated rectangle instead of a radius keeps long or rotated
+# buildings (shops, khrushchevkas, factories) from sitting on the shoulder.
+FOOTPRINT = {
+    "khata": (-4.95, 4.95, -4.45, 3.71), "khata_b": (-4.45, 4.45, -4.45, 3.71), "khata_tin": (-5.2, 5.2, -4.7, 3.96),
+    "home_house": (-5.45, 5.45, -6.4, 4.21), "garage": (-4.6, 4.6, -5.8, 4.7), "shed": (-2.3, 2.3, -2.21, 1.8),
+    "shop_village": (-5.3, 5.3, -4.6, 3.8), "church": (-4.4, 4.4, -10.0, 10.0), "bus_stop": (-2.2, 2.2, -0.92, 1.1),
+    "well": (-0.95, 0.95, -0.85, 0.85), "gas_station": (-8.0, 8.0, -6.0, 11.2), "khrushchevka": (-24.15, 24.15, -7.6, 7.2),
+    "parts_store": (-7.3, 7.3, -9.1, 5.3), "car_market": (-22.04, 22.04, -16.0, 16.1), "town_market": (-13.0, 13.0, -9.0, 9.0),
+    "warehouse": (-15.3, 15.3, -13.0, 9.3), "monument": (-3.0, 3.0, -3.0, 3.0), "sawmill": (-20.0, 20.0, -17.0, 17.0),
+    "lumber_camp": (-15.0, 15.0, -13.0, 13.0), "barn": (-16.0, 16.0, -17.0, 9.0), "grain_elevator": (-10.0, 10.0, -3.5, 2.5),
+    "cowshed": (-25.4, 25.4, -6.4, 6.4), "flour_mill": (-15.0, 15.0, -17.0, 9.0), "bakery": (-7.25, 7.25, -5.71, 5.25),
+    "oil_press": (-15.0, 15.0, -15.0, 11.4), "quarry_office": (-20.0, 20.0, -17.0, 17.0),
+    "furniture_factory": (-19.0, 19.0, -20.0, 10.0), "junkyard_office": (-26.1, 26.08, -25.59, 25.64),
+}
+# minimum clear distance (m) from any part of the building to the road edge
+SETBACK_DEFAULT = 8.0
+SETBACK = {"bus_stop": 3.0, "well": 3.0, "monument": 4.0, "gas_station": 4.0, "shed": 5.0, "garage": 5.0}
+road_gap = dist - hw
+
+
+def footprint_gap(o):
+    """(clear distance from the footprint to the nearest road edge, world point where it is smallest)"""
+    x0, x1, z0, z1 = FOOTPRINT[o["kind"]]
+    c, s_ = math.cos(o["rot"]), math.sin(o["rot"])
+    best = (1e9, None)
+    nx, nz = max(2, int((x1 - x0) / 0.5) + 1), max(2, int((z1 - z0) / 0.5) + 1)
+    pts = [(lx, z) for lx in np.linspace(x0, x1, nx) for z in (z0, z1)] + [(x, lz) for lz in np.linspace(z0, z1, nz) for x in (x0, x1)]
+    for lx, lz in pts:
+        wx, wz = o["x"] + lx * c + lz * s_, o["z"] - lx * s_ + lz * c
+        ri, ci = int(round(wz + HALF)), int(round(wx + HALF))
+        if 0 <= ri < N and 0 <= ci < N and road_gap[ri, ci] < best[0]:
+            best = (float(road_gap[ri, ci]), (ri, ci))
+    return best
+
+
+def move_obj(o, dx, dz):
+    o["x"] = round(o["x"] + dx, 2)
+    o["z"] = round(o["z"] + dz, 2)
+    for f in o.get("_yard", []):
+        f["x"] = round(f["x"] + dx, 2)
+        f["z"] = round(f["z"] + dz, 2)
+
+
+setback_log = []
+for o in objs:
+    if o["kind"] not in FOOTPRINT:
+        continue
+    need = SETBACK.get(o["kind"], SETBACK_DEFAULT)
+    g0, _ = footprint_gap(o)
+    x0_, z0_ = o["x"], o["z"]
+    for it in range(120):
+        g, p = footprint_gap(o)
+        if g >= need or p is None:
+            break
+        # push away from the road centre nearest to the closest footprint point
+        ri, ci = p
+        d = np.array([ci - ic[ri, ci], ri - ir[ri, ci]], float)
+        n_ = np.linalg.norm(d)
+        d = d / n_ if n_ > 1e-3 else np.array([o["x"] - (ic[ri, ci] - HALF), o["z"] - (ir[ri, ci] - HALF)]) / max(1e-3, math.hypot(o["x"] - (ic[ri, ci] - HALF), o["z"] - (ir[ri, ci] - HALF)))
+        move_obj(o, d[0] * 0.5, d[1] * 0.5)
+    g1, _ = footprint_gap(o)
+    if (o["x"], o["z"]) != (x0_, z0_) or g1 < need:
+        setback_log.append((o["kind"], x0_, z0_, g0, o["x"], o["z"], g1, need))
+print("setback: moved %d buildings" % len(setback_log))
+for k, ax, az, ga, bx, bz, gb, need in setback_log:
+    print("  %-18s (%7.1f,%7.1f) gap %5.1f m -> (%7.1f,%7.1f) gap %5.1f m  [min %.1f]%s" % (k, ax, az, ga, bx, bz, gb, need, "" if gb >= need else "  NOT MET"))
+
 # keep every object off the roads: nudge buildings / poles / lamps away, drop fence runs that end up on a road
 FOOT0 = {"khata": 9, "khata_b": 8, "khata_tin": 9, "home_house": 9, "garage": 6, "shed": 3, "shop_village": 8, "church": 11, "bus_stop": 2.5,
          "well": 1.5, "gas_station": 9, "khrushchevka": 26, "parts_store": 9, "car_market": 22, "town_market": 13, "warehouse": 17,
@@ -448,7 +520,7 @@ for o in objs:
         if ok:
             keep.append(o)
         continue
-    rr = FOOT0.get(k)
+    rr = None if k in FOOTPRINT else FOOT0.get(k)
     if rr is not None:
         for it in range(60):
             ri, ci = int(round(o["z"] + HALF)), int(round(o["x"] + HALF))
@@ -570,6 +642,8 @@ for rd in ROADS:
     roads_out.append(dict(kind=rd["kind"], w=rd["w"], pts=[[round(float(x), 2), round(float(y), 2), round(float(z), 2)] for (x, z), y in zip(d, ys)]))
 for k, Lc in LOC.items():
     Lc["y"] = round(H(Lc["x"], Lc["z"]), 2)
+for o in objs:
+    o.pop("_yard", None)
 world = dict(size=2048, water=WATER, river=[[round(x, 1), round(z, 1)] for x, z in river_pts], locations=LOC, roads=roads_out, objects=objs, fields=FIELDS)
 json.dump(world, open(os.path.join(OUT, "world.json"), "w"))
 json.dump(trees, open(os.path.join(OUT, "trees.json"), "w"))
