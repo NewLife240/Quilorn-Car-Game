@@ -1,6 +1,8 @@
 extends CanvasLayer
 ## In-game HUD, tablet (jobs / business / market / map / vehicle / help), modal dialogs and pause menu.
 
+const EconomyRules := preload("res://scripts/gameplay/economy.gd")
+
 var root: Control
 var money_lbl: Label
 var clock_lbl: Label
@@ -440,7 +442,7 @@ func open_office(key: String) -> void:
 		v.add_child(UIKit.label("You own this. Level %d/3. Upkeep ₴%d/day." % [ind.level, int(d.upkeep) * int(ind.level)], 17, Color(0.6, 1, 0.6)))
 		if int(ind.level) < 3:
 			v.add_child(UIKit.button("Upgrade to level %d (₴%s)" % [ind.level + 1, _fmt(int(d.price * 0.6 * int(ind.level)))], func(): eco.upgrade_industry(key); open_office(key)))
-		v.add_child(UIKit.label("Hire drivers (₴500 hiring + ₴260/day each) to haul your output automatically:", 17, UIKit.ACCENT))
+		v.add_child(UIKit.label("Hire drivers (₴%d hiring + ₴%d/day each, %d units per round trip) to haul your output automatically. Too many drivers flood the buyer and the price drops:" % [EconomyRules.DRIVER_HIRE, EconomyRules.DRIVER_WAGE, EconomyRules.ROUTE_UNITS], 17, UIKit.ACCENT))
 		var list := UIKit.vbox([], 6)
 		v.add_child(UIKit.scroll(list))
 		for g in d.out.keys():
