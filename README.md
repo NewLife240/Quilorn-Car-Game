@@ -68,6 +68,14 @@ per-size visibility ranges, sleeping idle vehicles, 60 Hz physics with sub-stepp
 - `tools/` - Blender and Python generators (`bl_vehicles.py`, `bl_parts.py`, `bl_buildings.py`, `world_gen.py`)
 - `tests/` - headless test scenes (driving, assembly + save/load, interaction, screenshots)
 
+## Tests
+
+`tests/run_tests.sh` runs every headless test (about 2 minutes on 4 cores) and exits non-zero if one fails.
+Set `GODOT=/path/to/godot` if Godot 4.7 is not on your `PATH`; pass a name part to run a subset,
+e.g. `tests/run_tests.sh hill`. The driving tests check that the automatic gearbox upshifts and that
+the car keeps its speed on the steepest hill, on worn (48% and 70%) and new parts. GitHub Actions runs
+the same script on every pull request.
+
 Regenerate content: `python3 tools/world_gen.py`, `blender -b --python tools/bl_buildings.py`, etc.
 
 ## Credits (all free licenses)
