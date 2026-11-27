@@ -701,6 +701,9 @@ func gear_text() -> String:
 	return str(gear - 1)
 
 
+var _grind_msg_ms := -100000
+
+
 func _shift(g: int) -> void:
 	var ratios: Array = gears.ratios
 	g = clampi(g, 0, ratios.size() - 1)
@@ -710,7 +713,10 @@ func _shift(g: int) -> void:
 		return
 	# grinding into reverse at speed
 	if g == 0 and speed_kmh > 8.0:
-		Game.notify("Gears grind! Stop before reverse", "warn")
+		var now := Time.get_ticks_msec()
+		if now - _grind_msg_ms > 2500:
+			_grind_msg_ms = now
+			Game.notify("Gears grind! Stop before reverse", "warn")
 		return
 	gear = g
 	shift_timer = 0.28 if auto_gearbox else 0.2
@@ -751,7 +757,9 @@ func _read_input(delta: float) -> void:
 			thr = t2
 			if brk > 0.1 and fwd_speed > -0.5:
 				_shift(2)
-		elif brk > 0.1 and fwd_speed < 0.6 and thr < 0.05:
+		elif brk > 0.1 and absf(fwd_speed) < 0.6 and speed_kmh < 6.0 and thr < 0.05:
+			# only once (nearly) stopped: rolling back down a hill or sliding sideways, S just brakes
+			# (it used to try reverse every frame there and spam "Gears grind!")
 			_shift(0)
 			brk = 0.0
 		elif thr > 0.05 and gear == 1:

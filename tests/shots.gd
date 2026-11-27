@@ -48,6 +48,30 @@ func _ready() -> void:
 		var c0: Vector3 = pos + dir * 12.0 + dir * 9.0 + Vector3.UP * 1.6
 		views = [["wheels", "cam", c0, pos + dir * 12.0 + Vector3.UP * 0.6]]
 		return
+	if OS.get_cmdline_user_args().has("lots"):
+		# buildings next to the road: gas station on the highway, village street, village shop front
+		var lv := []
+		for spec in [["lots_gas", "gas_station", 0, -26.0], ["lots_shop", "shop_village", 0, -24.0], ["lots_khata", "khata", 0, -30.0]]:
+			var ob: Dictionary = {}
+			var bdo := 1e9
+			for o in world.data.objects:
+				if o.kind == spec[1] and Vector2(o.x, o.z).distance_to(Vector2(-60, 220)) < bdo:
+					bdo = Vector2(o.x, o.z).distance_to(Vector2(-60, 220))
+					ob = o
+			var rp2: Array = world.data.roads[spec[2]].pts
+			var bi2 := 0
+			var bd3 := 1e9
+			for i in range(rp2.size()):
+				var d3 := Vector2(rp2[i][0], rp2[i][2]).distance_to(Vector2(ob.x, ob.z))
+				if d3 < bd3:
+					bd3 = d3
+					bi2 = i
+			var back: Array = rp2[clampi(bi2 + int(spec[3] / 2.0), 0, rp2.size() - 1)]
+			var cpos := Vector3(back[0], world.terrain.height_at(back[0], back[2]) + 3.0, back[2])
+			lv.append([spec[0], "cam", cpos, Vector3(ob.x, float(ob.y) + 2.0, ob.z)])
+		views = lv
+		settle = 30
+		return
 	if OS.get_cmdline_user_args().has("hill"):
 		var hv := []
 		for spot in [[6, Vector2(-207, 193)], [0, Vector2(-373, 296)], [3, Vector2(-180, 262)]]:
